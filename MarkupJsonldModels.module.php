@@ -15,7 +15,7 @@
 class MarkupJsonldModels extends WireData implements Module, ConfigurableModule {
 
 	/**
-	 * Available schema types
+	 * All of the schema types available
 	 *
 	 * @return array
 	 *
@@ -37,7 +37,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
-	 * Schema fields that can be mapped for each schema type
+	 * Set the fields for each schema type
 	 *
 	 * @return array
 	 *
@@ -46,48 +46,59 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return array(
 			'Article' => array(
 				'headline',
-				'description',
-				'image',
+				'abstract',
+				'articleBody',
 				'author',
 				'datePublished',
-				'dateModified',
+				'publisher',
+				'image',
 			),
 			'BlogPosting' => array(
 				'headline',
-				'description',
-				'image',
+				'articleBody',
 				'author',
 				'datePublished',
-				'dateModified',
+				'publisher',
+				'mainEntityOfPage',
+				'image',
 			),
 			'NewsArticle' => array(
 				'headline',
-				'description',
-				'image',
+				'articleBody',
 				'author',
 				'datePublished',
-				'dateModified',
+				'publisher',
+				'image',
+				'dateline',
 			),
 			'Product' => array(
 				'name',
 				'description',
 				'image',
 				'brand',
+				'manufacturer',
 				'sku',
+				'mpn',
+				'offers',
 			),
 			'Event' => array(
 				'name',
 				'description',
-				'image',
 				'startDate',
 				'endDate',
 				'location',
+				'organizer',
+				'image',
+				'eventStatus',
 			),
 			'Organization' => array(
 				'name',
 				'description',
 				'url',
 				'logo',
+				'contactPoint',
+				'founder',
+				'foundingDate',
 			),
 			'LocalBusiness' => array(
 				'name',
@@ -95,21 +106,28 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 				'image',
 				'telephone',
 				'address',
+				'openingHours',
+				'priceRange',
 			),
 			'Person' => array(
 				'name',
 				'description',
 				'image',
 				'jobTitle',
+				'worksFor',
+				'url',
 			),
 			'WebPage' => array(
 				'name',
 				'description',
 				'image',
+				'url',
+				'mainEntity',
 			),
 			'FAQPage' => array(
 				'name',
 				'description',
+				'mainEntity',
 			),
 		);
 	}
@@ -169,7 +187,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
-	 * Get mapped JSON-LD values for a page and schema type
+	 * This function gets page field for the relevant schema type as defined in the module config
 	 *
 	 * @param Page $page
 	 * @param string $schemaType
@@ -182,69 +200,21 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		$schemaFields = $this->getSchemaFields();
 
-		if(!$schemaType || !isset($schemaFields[$schemaType])) {
-			return $data;
-		}
 
 		foreach($schemaFields[$schemaType] as $property) {
-			$configName = 'schema_field_map__' . $schemaType . '__' . $property;
-			$fieldName = $this->$configName;
 
-			if(!$fieldName) {
-				continue;
-			}
+			$fieldName = 'schema_field_map__' . $schemaType . '__' . $property;
 
-			$value = $page->get($fieldName);
-			$value = $this->schemaValueToString($value);
-
-			if($value !== '') {
+			// Retrieve module configuration data
+			$moduleConfigData = $this->modules->getConfig($this);
+			if (isset($moduleConfigData[$fieldName])) {
+				$pageField = $moduleConfigData[$fieldName];
+				$value = $page->get($pageField);
 				$data[$property] = $value;
 			}
 		}
 
 		return $data;
-	}
-
-	/**
-	 * Convert a ProcessWire field value to a schema-safe scalar value
-	 *
-	 * @param mixed $value
-	 * @return string
-	 *
-	 */
-	protected function schemaValueToString($value) {
-
-		if(is_string($value) || is_numeric($value)) {
-			return (string) $value;
-		}
-
-		if($value instanceof Page) {
-			return $value->title;
-		}
-
-		if($value instanceof PageArray && $value->count()) {
-			$items = array();
-
-			foreach($value as $page) {
-				$items[] = $page->title;
-			}
-
-			return implode(', ', $items);
-		}
-
-		if($value instanceof WireArray && $value->count()) {
-			$first = $value->first();
-
-			if($first && isset($first->url)) {
-				return $first->url;
-			}
-		}
-
-		if(is_object($value) && isset($value->url)) {
-			return $value->url;
-		}
-
-		return '';
 	}
 
 	/**
@@ -272,7 +242,6 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		// If the admin
 		if($page->rootParent->id === $this->wire()->config->adminRootPageID) {
-
 			// Add hooks on template editor
 			$process = 'ProcessTemplate';
 			if($page->process === $process) {
@@ -283,31 +252,18 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		// If not the admin
 		if($page->rootParent->id !== $this->wire()->config->adminRootPageID) {
-
 			// Hook on page render to add JSON-LD to the head
 			$this->addHookAfter('Page::render', function(HookEvent $event) {
 
 				$page = $event->object;
 				$html = $event->return;
-				$contentType = $page->template->contentType;
-
-//				if(
-//					// Not HTML or missing HTML tags
-//					($contentType && $contentType !== 'html') ||
-//					strpos($html, '</head>') === false ||
-//					strpos($html, '</html>') === false ||
-//					strpos($html, '</body>') === false //||
-//					// Page already has JSON-LD in the head
-//					//strpos(explode('</head>', $event->return)[0], 'application/ld+json') !== false
-//				) {
-//                    echo "HTML missing";
-//					return;
-//				}
 
                 $data = array();
 
                 $jsonld = $page->jsonld ?: $page->template->jsonld ?: $this->jsonld;
                 $schemaType = $page->meta('jsonld_schema_type');
+
+
 
                 if($jsonld) {
                     $parsed = $this->parseJsonld($jsonld, $page);
@@ -316,13 +272,6 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
                     }
                 }
 
-				if($schemaType && empty($data)) {
-					$data = array(
-						'@context' => 'https://schema.org',
-						'@type' => $schemaType,
-					);
-				}
-
 				if(empty($data)) {
 					return;
 				}
@@ -330,19 +279,33 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 				if($schemaType) {
 					if(isset($data['@type'])) {
 						$data['@type'] = $schemaType;
-						$data = array_merge($data, $this->getMappedSchemaData($page, $schemaType));
+						$schemaData = $this->getMappedSchemaData($page, $schemaType);
+						echo json_encode($schemaData);
+						$data = array_merge($data, $schemaData);
+
 					} else if(isset($data[0]) && is_array($data[0])) {
 						$data[0]['@type'] = $schemaType;
 						$data[0] = array_merge($data[0], $this->getMappedSchemaData($page, $schemaType));
 					}
 				}
 
+				//Renders the schema into the head of the page
+//				$event->return = str_replace(
+//					'</head>',
+//					'<script type="application/ld+json">' .
+//						json_encode($data) .
+//					'</script>' .
+//					'</head>',
+//					$html
+//				);
+
+				//Renders the Schema onto the page for debugging
 				$event->return = str_replace(
-					'</head>',
-					'<script type="application/ld+json" class="output-json">' .
-						json_encode($data) .
-					'</script>' .
-					'</head>',
+					'<p>Test Paragraph</p>',
+					'<pre class="output-json">' .
+					htmlspecialchars(json_encode($data, JSON_PRETTY_PRINT)) .
+					'</pre>' .
+					'<p>Test Paragraph</p>',
 					$html
 				);
 			});
@@ -383,7 +346,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			$form->add($f);
 		}
 
-		$event->return = $form;
+		
 		$event->return = $form;
 	}
 
