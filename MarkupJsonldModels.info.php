@@ -9,7 +9,7 @@
 
 $info = [
 	'title' => 'Markup JSON-LD Models',
-	'summary' => 'todo',
+	'summary' => 'Allows defining JSON-LD models on a per-page and per-template basis with placeholder support.',
 	'version' => 001,
 	'author' => 'nbcommunication',
 	'href' => 'https://github.com/nbcommunication/MarkupJsonldModels',
