@@ -14,13 +14,8 @@
 
 class MarkupJsonldModels extends WireData implements Module, ConfigurableModule {
 
-	// /**
-	//  * Initialize the module
-	//  *
-	//  */
-	// public function init() {
-
-	// }
+	/** @var TemplatesArray */
+	protected $eligibleTemplates;
 
 	/**
 	 * When ProcessWire is ready
@@ -30,8 +25,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		$page = $this->wire()->page;
 
-
-		if($page->rootParent->id === $this->wire()->config->adminRootPageID) {
+		if($page->template->name === 'admin') {
 
 			// If the admin, add hooks to page and template edit forms
 
@@ -50,7 +44,10 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			// Create a custom property so the page's JSON-LD model can be accessed with $page->jsonldModel
 			$this->addHookProperty('Page::jsonldModel', function(HookEvent $event) {
 				$page = $event->object;
-				$jsonld = $page->jsonld_model ?: $page->template->jsonld_model ?: $this->jsonld_model;
+				if(!$this->eligibleTemplates()->has($page->template)) {
+					return;
+				}
+				$jsonld = $page->getUnformatted('jsonld_model') ?: $page->template->jsonld_model ?: $this->jsonld_model;
 				$jsonld = $this->populateModel($jsonld, $page);
 				$event->return = $jsonld;
 			});
@@ -61,36 +58,90 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
-	 * Get field names for a page, excluding fieldsets
+	 * Get breadcrumb list for a page in JSON-LD format
 	 *
 	 * @param Page $page
 	 * @return array
 	 *
 	 */
-	public function ___getPageFields(Page $page) {
-		$fields = [];
-		foreach($page->getFields() as $field) {
-			if(
-				$field->type instanceof FieldtypeFieldsetTabOpen ||
-				$field->type instanceof FieldtypeFieldsetClose ||
-				$field->type instanceof FieldtypeRepeater ||
-				$field->name === 'jsonld_model' // exclude the jsonld_model field itself to avoid confusion
-			) {
-				continue;
-			}
-			$fields[$field->id] = $field->name;
+	public function ___getBreadcrumbList(Page $page) {
+		$breadcrumbs = [];
+		foreach($this->getBreadcrumbPages($page) as $item) {
+			$breadcrumbs[] = $this->getBreadcrumbListItem($item, count($breadcrumbs) + 1);
 		}
-		return $fields;
+		return $breadcrumbs;
+	}
+
+	/**
+	 * Get a breadcrumb list item for a page in JSON-LD format
+	 *
+	 * @param Page $page
+	 * @param int $position
+	 * @return array
+	 *
+	 */
+	public function ___getBreadcrumbListItem(Page $page, $position) {
+		return [
+			'@type' => 'ListItem',
+			'position' => $position,
+			'name' => $page->getUnformatted('title'),
+			'item' => $page->httpUrl,
+		];
+	}
+
+	/**
+	 * Get breadcrumb pages for a page (parents + self)
+	 *
+	 * @param Page $page
+	 * @return PageArray
+	 *
+	 */
+	public function ___getBreadcrumbPages(Page $page) {
+		return $page->parents->add($page);
+	}
+
+	/**
+	 * Get field names for a page, excluding fieldsets
+	 *
+	 * @param Fieldgroup $fieldgroup
+	 * @param Page|null $page Optional page to check for field values to exclude empty fields from the list
+	 * @return FieldsArray
+	 *
+	 */
+	public function ___getExampleFields(Fieldgroup $fieldgroup, Page $page = null) {
+		$exampleFields = $this->wire(new FieldsArray());
+		if(!$fieldgroup->count()) {
+			return $exampleFields;
+		}
+		foreach($fieldgroup as $field) {
+			if(
+				$field->type instanceof FieldtypeDatetime ||
+				$field->type instanceof FieldtypeDecimal ||
+				$field->type instanceof FieldtypeFloat ||
+				$field->type instanceof FieldtypeInteger ||
+				$field->type instanceof FieldtypeText
+			) {
+				if($field->name === 'jsonld_model') { // exclude the jsonld_model field itself to avoid confusion
+					continue;
+				}
+				if($page && $page->id) {
+					$valueRaw = $page->getUnformatted($field->name);
+					if(empty($valueRaw) || ($valueRaw instanceof WireArray && !$valueRaw->count())) continue;
+				}
+				$exampleFields->add($field);
+			}
+		}
+		return $exampleFields;
 	}
 
 	/**
 	 * Get templates that can be used with JSON-LD models (non-system HTML templates)
 	 *
-	 * @return array
+	 * @return TemplatesArray
 	 *
 	 */
 	public function ___getTemplates() {
-		$templates = [];
+		$modelTemplates = $this->wire(new TemplatesArray());
 		foreach($this->wire()->templates as $template) {
 			if($template->flags & Template::flagSystem) {
 				continue;
@@ -99,13 +150,15 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			if($contentType && $contentType !== 'html') {
 				continue;
 			}
-			$templates[$template->id] = $template->name;
+			$modelTemplates->add($template);
 		}
-		return $templates;
+		return $modelTemplates;
 	}
 
 	/**
 	 * Load scripts for the module to use CodeMirror 6 in the admin for the JSON-LD model textarea
+	 *
+	 * Called internally and from MarkupJsonldModelsConfig
 	 *
 	 */
 	public function loadScripts() {
@@ -113,41 +166,6 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		$url = $config->urls($this);
 		$config->scripts->add("{$url}cm6.bundle.min.js");
 		$config->scripts->add("{$url}cm6.init.js");
-	}
-
-	/**
-	 * Populate JSON-LD model with breadcrumb values
-	 *
-	 * @param string $jsonld
-	 * @param Page $page
-	 * @return string
-	 *
-	 * @todo think about whether this should be hookable, or rather move page->parent->add($page) to a separate method that can be used in the hook and also in the default implementation, to allow for custom breadcrumb structures (e.g. including siblings, etc.)
-	 *
-	 */
-	public function ___populateBreadcrumbList($jsonld, Page $page) {
-
-		if(strpos($jsonld, '{breadcrumbList}') !== false) {
-
-			$breadcrumbs = [];
-			foreach($page->parents->add($page) as $parent) {
-				$breadcrumbs[] = [
-					'@type' => 'ListItem',
-					'position' => count($breadcrumbs) + 1,
-					'name' => $parent->title,
-					'item' => $parent->httpUrl,
-				];
-			}
-
-			$jsonld = str_replace(
-				'"{breadcrumbList}"',
-				json_encode($breadcrumbs),
-				$jsonld
-			);
-		}
-
-		return $jsonld;
-
 	}
 
 	/**
@@ -165,28 +183,33 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		}
 
 		// Populate Page breadcrumb items
-		$jsonld = $this->populateBreadcrumbList($jsonld, $page);
+		if(strpos($jsonld, '{breadcrumbList}') !== false) {
+			$jsonld = str_replace(
+				'"{breadcrumbList}"',
+				json_encode($this->getBreadcrumbList($page)),
+				$jsonld
+			);
+		}
 
 		// Populate setting() vars
-		$jsonld = $this->populatePlaceholders($jsonld, setting(), [
-			'prefix' => 'setting',
-		]);
+		if(strpos($jsonld, '{setting.') !== false) {
+			$jsonld = $this->populatePlaceholders($jsonld, setting() ?: [], [
+				'prefix' => 'setting',
+			]);
+		}
 
-		// Populate any other wire-defined objects (e.g. user, page, etc.)
-		// only if the placeholder matches the format {object.field}
-		if(preg_match_all('/\{([a-zA-Z0-9_.]+\.[a-zA-Z0-9_.]+)\}/', $jsonld, $matches)) {
+		// Populate $page vars
+		if(strpos($jsonld, '{page.') !== false) {
+			$jsonld = $this->populatePlaceholders($jsonld, $page, [
+				'prefix' => 'page',
+			]);
+		}
 
-			foreach($matches[1] as $placeholder) {
-
-				$parts = explode('.', $placeholder, 2);
-				$prefix = $parts[0];
-
-				if($this->wire()->$prefix) {
-					$jsonld = $this->populatePlaceholders($jsonld, $this->wire()->$prefix, [
-						'prefix' => $prefix,
-					]);
-				}
-			}
+		// Populate $input vars
+		if(strpos($jsonld, '{input.') !== false) {
+			$jsonld = $this->populatePlaceholders($jsonld, $this->wire()->input, [
+				'prefix' => 'input',
+			]);
 		}
 
 		return $this->populatePlaceholders($jsonld, $page, [
@@ -223,10 +246,10 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return [
 			'@context' => 'https://schema.org',
 			'@type' => 'ImageObject',
+			'name' => $pageimage->description,
 			'url' => $pageimage->httpUrl,
 			'width' => $pageimage->width,
 			'height' => $pageimage->height,
-			'name' => $pageimage->description,
 		];
 	}
 
@@ -253,14 +276,26 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 				return $jsonld;
 			}
 
+			$truncate = $options['truncate'] ?? false;
+			if($truncate && !is_int($truncate)) {
+				$truncate = 100;
+			}
+
 			// Check vars and if convert to a string if necessary
 			$placeholderVars = [];
 			if(preg_match_all('/\{' . preg_quote($prefix) . '\.([a-zA-Z0-9_.]+)\}/', $jsonld, $matches)) {
 
 				$removeQuotes = [];
+				$isPage = $vars instanceof Page;
+				$isInput = $vars instanceof WireInput;
+				$isObject = is_object($vars);
+				$isArray = is_array($vars);
+				$allowedInputFields = [
+					'url', 'httpUrl', 'httpHostUrl', 'scheme',
+					'urlSegment1', 'urlSegment2', 'urlSegment3',
+					'pageNum', 'pageNumStr', 'queryString', 'urlSegmentStr'
+				];
 				foreach(array_unique($matches[1]) as $field) {
-
-					$isPage = $vars instanceof Page;
 
 					$value = '';
 					if($isPage) {
@@ -270,23 +305,30 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 							$fieldName = substr($field, 0, strrpos($field, '.'));
 							$index = $match[1];
 							$fieldValue = $vars->getUnformatted($fieldName);
-							if($index === 'first') {
-								$value = $fieldValue->first();
-							} else if($index === 'last') {
-								$value = $fieldValue->last();
+							if($fieldValue instanceof WireArray) {
+								if($index === 'first') {
+									$value = $fieldValue->first();
+								} else if($index === 'last') {
+									$value = $fieldValue->last();
+								} else {
+									$value = $fieldValue->eq($index) ?: '';
+								}
 							} else {
-								$value = $fieldValue->eq($index) ?: '';
+								$value = '';
 							}
-
 						} else {
 							$value = $vars->getUnformatted($field);
 						}
 
-					} else if($vars instanceof Wire || $vars instanceof WireData) {
-						$value = $vars->get($field);
-					} else if(is_object($vars) && isset($vars->$field)) {
+					} else if($isInput) {
+						if(in_array($field, $allowedInputFields)) {
+							$value = $field === 'httpHostUrl' ? $vars->httpHostUrl() : $vars->$field;
+						} else {
+							$value = '';
+						}
+					} else if($isObject && isset($vars->$field)) {
 						$value = $vars->$field;
-					} else if(is_array($vars) && isset($vars[$field])) {
+					} else if($isArray && isset($vars[$field])) {
 						$value = $vars[$field];
 					}
 
@@ -298,9 +340,11 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 							if($value instanceof Pageimages) {
 
 								$removeQuotes[] = $key;
-								$value = json_encode(array_values($value->explode(function($pageimage) {
-									return $this->populatePageimage($pageimage);
-								})));
+								$value = $value->count ?
+									json_encode(array_values($value->explode(function($pageimage) {
+										return $this->populatePageimage($pageimage);
+									}))) :
+									'[]';
 
 							} else if($value instanceof Pageimage) {
 
@@ -310,9 +354,11 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 							} else if($value instanceof Pagefiles) {
 
 								$removeQuotes[] = $key;
-								$value = json_encode(array_values($value->explode(function($pagefile) {
-									return $this->populatePagefile($pagefile);
-								})));
+								$value = $value->count ?
+									json_encode(array_values($value->explode(function($pagefile) {
+										return $this->populatePagefile($pagefile);
+									}))) :
+									'[]';
 
 							} else if($value instanceof Pagefile) {
 
@@ -344,30 +390,28 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 							// If the field is a system date field, convert to ISO 8601 format for JSON-LD
 							$value = date('c', $value);
 
-						} else if(is_int($value) && $isPage && $vars->getField($field)->type instanceof FieldtypeDatetime) {
+						} else if(is_int($value) && $isPage && ($f = $vars->getField($field)) && $f->type instanceof FieldtypeDatetime) {
 
 							// If the field is a date field, convert to ISO 8601 format for JSON-LD
 							$value = date('c', $value);
 
-						} else {
-							$removeQuotes[] = $key; // int, float, bool, null should not be quoted in the JSON-LD output
-						}
+						} else if(is_bool($value)) {
 
-						if(is_bool($value)) {
+							$removeQuotes[] = $key;
 							$value = $value ? 'true' : 'false';
+
 						} else if(is_null($value)) {
+
 							$value = '';
+
+						} else {
+
+							$removeQuotes[] = $key; // int, float should not be quoted in the JSON-LD output
 						}
 					}
 
-					$truncate = $options['truncate'] ?? false;
-					if($truncate) {
-						if(!is_int($truncate)) {
-							$truncate = 100;
-						}
-						if(is_string($value) && strlen($value) > $truncate) {
-							$value = $this->wire()->sanitizer->truncate($value, $truncate);
-						}
+					if($truncate && is_string($value) && strlen($value) > $truncate) {
+						$value = $this->wire()->sanitizer->truncate($value, $truncate);
 					}
 
 					$placeholderVars[$field] = $value;
@@ -401,6 +445,64 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
+	 * Append JSON-LD script to the head of the page if a model is defined
+	 *
+	 * @param HookEvent $event
+	 *
+	 */
+	protected function appendJsonldToHead(HookEvent $event) {
+
+		$page = $event->object;
+		$html = $event->return;
+
+		if(!is_string($html)) {
+			return;
+		}
+
+		$headEnd = strpos($html, '</head>');
+		if(
+			$headEnd === false ||
+			strpos($html, '</html>') === false ||
+			strpos($html, '</body>') === false ||
+			strpos(substr($html, 0, $headEnd), 'application/ld+json') !== false ||
+			!$this->eligibleTemplates()->has($page->template)
+		) {
+			return;
+		}
+
+		$jsonld = trim($page->jsonldModel);
+		if(empty($jsonld)) {
+			return;
+		}
+
+		// An array of JSON-LD objects should be wrapped in a @graph
+		if(isset($jsonld[0]) && $jsonld[0] === '[' && substr($jsonld, -1) === ']') {
+			$jsonld = "{\"@context\":\"https://schema.org\",\"@graph\":$jsonld}";
+		}
+
+		$data = json_decode($jsonld, true);
+		if($data === null && json_last_error() !== JSON_ERROR_NONE) {
+			if($this->wire()->config->debug && $this->wire()->user->isSuperUser()) {
+				$this->log(sprintf($this->_('Invalid JSON-LD model for page %1$d: %2$s - %3$s'), $page->id, json_last_error_msg(), $jsonld));
+			}
+			return;
+		}
+		if(empty($data)) return; // empty but valid - silently skip
+
+		$event->return = str_replace(
+			'</head>',
+			'<script type="application/ld+json">' .
+				($this->wire()->user->isSuperUser() ?
+					json_encode($data, JSON_PRETTY_PRINT) :
+					$jsonld
+				) .
+			'</script>' .
+			'</head>',
+			$html
+		);
+	}
+
+	/**
 	 * Build the Template edit form to add JSON-LD model textarea
 	 *
 	 * @param HookEvent $event
@@ -410,7 +512,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		$template = $event->arguments(0);
 
-		if(!isset($this->getTemplates()[$template->id])) {
+		if(!$this->eligibleTemplates()->has($template)) {
 			return;
 		}
 
@@ -422,11 +524,11 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			$this->loadScripts();
 
 			$placeholders = [];
-			foreach($this->getPageFields($this->wire()->pages->get("template=$template")) as $fieldId => $fieldName) {
+			foreach($this->getExampleFields($template->fieldgroup) as $field) {
 				$placeholders[] = sprintf(
 					'`{page.%1$s}`: %2$s',
-					$fieldName,
-					$this->wire()->fields->get($fieldId)->label ?: $fieldName
+					$field->name,
+					$field->label ?: $field->name
 				);
 			}
 
@@ -438,12 +540,10 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 				'type' => 'textarea',
 				'name' => 'jsonld_model',
 				'label' => $this->_('JSON-LD Model'),
-				// 'description' => $this->_('Define a JSON-LD model using placeholders like {{page.title}} or {{setting.name}}'),
 				'notes' => sprintf(
-				$this->_('You can use the following placeholders to populate existing page values: %s'),
-				"\n" .
-				implode("\n", $placeholders)
-			),
+					$this->_('You can use the following placeholders to populate existing page values: %s'),
+					"\n" . implode("\n", $placeholders)
+				),
 				'icon' => 'code',
 				'rows' => 20,
 				'collapsed' => 2,
@@ -463,7 +563,12 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 *
 	 */
 	protected function buildEditTemplateFormSave(HookEvent $event) {
-		$event->arguments(0)->set('jsonld_model', json_encode(json_decode($this->wire()->input->post->textarea('jsonld_model'))) ?: '');
+		$input = $this->wire()->input->post->textarea('jsonld_model');
+		$data = json_decode($input, true) ?? [];
+		if(!empty($input) && empty($data)) {
+			$this->error(sprintf($this->_('Invalid JSON in JSON-LD model — field was cleared. %s'), json_last_error_msg()));
+		}
+		$event->arguments(0)->set('jsonld_model', is_array($data) && count($data) ? json_encode($data) : '');
 	}
 
 	/**
@@ -476,10 +581,10 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		$form = $event->return;
 
-		$page = $this->wire()->pages->get($this->wire()->input->get->int('id'));
+		$page = $event->object->getPage();
 		if($page->id && $page->hasField('jsonld_model')) {
 
-			$jsonldModelField = $form->get('jsonld_model'); // todo what if it is in a repeater?
+			$jsonldModelField = $form->get('jsonld_model');
 			if($jsonldModelField) {
 
 				$this->loadScripts();
@@ -490,18 +595,13 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 				}
 
 				$placeholders = [];
-				foreach($this->getPageFields($page) as $fieldId => $fieldName) {
+				foreach($this->getExampleFields($page->fields, $page) as $field) {
 
-					$value = $page->get($fieldName);
-					if(empty($value)) continue;
-
-					$valueRaw = $page->getUnformatted($fieldName);
-					if($valueRaw instanceof WireArray && !$valueRaw->count()) continue;
-
+					$key = $field->name;
 					$placeholders[] = sprintf(
 						'`{page.%1$s}`: %2$s',
-						$fieldName,
-						$this->populatePlaceholders('{page.' . $fieldName . '}', $page, [
+						$key,
+						$this->populatePlaceholders('{page.' . $key . '}', $page, [
 							'prefix' => 'page',
 							'truncate' => true,
 						])
@@ -510,8 +610,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 				$existingNotes .= sprintf(
 					$this->_('You can use the following placeholders to populate existing page values: %s'),
-					"\n" .
-					implode("\n", $placeholders)
+					"\n" . implode("\n", $placeholders)
 				);
 				$jsonldModelField->notes = $existingNotes;
 			}
@@ -521,55 +620,16 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
-	 * Append JSON-LD script to the head of the page if a model is defined
+	 * Get eligible templates for JSON-LD
 	 *
-	 * @param HookEvent $event
+	 * @return TemplatesArray
 	 *
 	 */
-	protected function appendJsonldToHead(HookEvent $event) {
-
-		$page = $event->object;
-		$html = $event->return;
-		$contentType = $page->template->contentType;
-
-		if(
-			// Not HTML or missing HTML tags
-			($contentType && $contentType !== 'html') ||
-			strpos($html, '</head>') === false ||
-			strpos($html, '</html>') === false ||
-			strpos($html, '</body>') === false ||
-			// Page already has JSON-LD in the head
-			strpos(explode('</head>', $event->return)[0], 'application/ld+json') !== false
-		) {
-			return;
+	protected function eligibleTemplates() {
+		if($this->eligibleTemplates === null) {
+			$this->eligibleTemplates = $this->getTemplates();
 		}
-
-		$jsonld = $page->jsonldModel;
-		if(empty($jsonld)) {
-			return;
-		}
-
-		// An array of JSON-LD objects should be wrapped in a @graph
-		if(substr($jsonld, 0, 1) === '[' && substr($jsonld, -1) === ']') {
-			$jsonld = "{\"@context\": \"https://schema.org\",\"@graph\": $jsonld}";
-		}
-
-		$data = json_decode($jsonld, true) ?: [];
-		if(empty($data)) {
-			if($this->wire()->config->debug && $this->wire()->user->isSuperUser()) {
-				$this->wire()->log("Invalid JSON-LD model for page {$page->id}: $jsonld");
-			}
-			return;
-		}
-
-		$event->return = str_replace(
-			'</head>',
-			'<script type="application/ld+json">' .
-				json_encode($data, ($this->wire()->user->isSuperUser() ? JSON_PRETTY_PRINT : 0)) .
-			'</script>' .
-			'</head>',
-			$html
-		);
+		return $this->eligibleTemplates;
 	}
 
 	/**
@@ -580,10 +640,10 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		// Add jsonld_model field if it doesn't exist
 		$fields = $this->wire()->fields;
 		if(!$fields->get('jsonld_model')) {
-			$field = $fields->new('textarea', 'jsonld_model', [
+			$fields->new('textarea', 'jsonld_model', [
 				'label' => $this->_('JSON-LD Model'),
 				'icon' => 'code',
-				'contentType' => 1,
+				'contentType' => 0,
 				'collapsed' => 2,
 				'rows' => 20,
 			]);
@@ -598,9 +658,14 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		// Remove jsonld_model field if it exists
 		$fields = $this->wire()->fields;
 		$field = $fields->get('jsonld_model');
-		if($field) {
-			$fields->delete($field);
+		if(!$field) return;
+		foreach($this->wire()->templates as $template) {
+			if($template->fieldgroup->hasField($field)) {
+				$template->fieldgroup->remove($field);
+				$template->fieldgroup->save();
+			}
 		}
+		$fields->delete($field);
 	}
 
 }

@@ -57,16 +57,16 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 			$label = sprintf($this->_('Edit %s'), $label);
 			return "<a href='$url' target='_blank'>$label</a>";
 		};
-		foreach($markupJsonldModels->getTemplates() as $id => $tpl) {
+		$allModelPages = $pages->find("jsonld_model!=,include=hidden");
+		foreach($markupJsonldModels->getTemplates() as $template) {
 
-			$modelPages = $pages->find("template=$id,jsonld_model!=");
+			$modelPages = $allModelPages->find("template=$template");
 			$byPage = $modelPages->count;
 
-			$template = $this->wire()->templates->get($id);
 			if($template->jsonld_model) {
 				$rows['template'][] = [
-					$template->label ? "$template->label ({$tpl})" : $tpl,
-					$pages->count("template=$id,include=hidden") - $byPage,
+					$template->label ? "$template->label ({$template->name})" : $template->name,
+					$pages->count("template=$template,include=hidden") - $byPage,
 					$_editLink($template->editUrl, $labelTemplate)
 				];
 			}
@@ -85,7 +85,9 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 		$out = '';
 		foreach($rows as $type => $typeRows) {
 
-			ksort($typeRows);
+			usort($typeRows, function($a, $b) {
+				return strcmp($a[0], $b[0]);
+			});
 
 			$table = $modules->get('MarkupAdminDataTable');
 			$table->setEncodeEntities(false);
@@ -97,7 +99,7 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 				case 'template':
 					$headers = [
 						$labelTemplate,
-						$this->_('Page Count'),
+						$this->_('# Pages'),
 					];
 					break;
 				case 'page':
@@ -112,21 +114,15 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 
 			$table->headerRow($headers);
 			foreach($typeRows as $row) {
-				$rowOptions = [];
-				if(isset($options['rowClasses'][$index])) {
-					$rowOptions['class'] = $options['rowClasses'][$index];
-				}
-				$table->row($row, $rowOptions);
+				$table->row($row);
 			}
 
 			$table->setColNotSortable(count($headers) - 1);
 
-			// $table->removeClass('uk-table-justify');
-
 			$out .= $table->render();
 		}
 
-		if(count($rows)) {
+		if(count($rows['page']) || count($rows['template'])) {
 
 			$inputfields->add([
 				'type' => 'markup',
