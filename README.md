@@ -18,10 +18,15 @@ This module allows you to define JSON-LD models on a per-page and per-template b
 - [Output](#output)
   - [JSON-LD output format](#json-ld-output-format)
   - [$page->jsonldModel](#page-jsonldmodel)
+  - [$page->jsonldOutput](#page-jsonldoutput)
 - [Hooks](#hooks)
   - [Changing module behaviour](#changing-module-behaviour)
   - [Modifying placeholder values and model output](#modifying-placeholder-values-and-model-output)
 - [Example Model and Output](#example-model-and-output)
+- [Working with Agent Tools](#working-with-agent-tools)
+  - [Providing context for AI agents](#providing-context-for-ai-agents)
+  - [Example prompts](#example-prompts)
+- [Caching](#caching)
 - [Troubleshooting and Debugging](#troubleshooting-and-debugging)
 - [License](#license)
 - [Further Reading and Resources](#further-reading-and-resources)
@@ -51,7 +56,7 @@ Models can be defined on a per-page basis using the `jsonld_model` field, on a p
 
 In each case the field for entering the model is a textarea that accepts JSON input, and **requires the JSON to be valid before it is saved**. The field uses CodeMirror 6 to provide syntax highlighting and error checking for the JSON input, and will show an error message if the JSON is invalid. Please note that if updating models programmatically via the API, you must ensure the JSON is valid before saving.
 
-A list of example placeholders is appended to the field via `Inputfield::notes`. For the `jsonld_model` field, the example placeholders are determined by the page itself, whereas the template examples will use the first page it can find using that template. The rendered values are truncated in the notes to avoid excessively long placeholder examples.
+A list of example placeholders is appended to the field via `Inputfield::notes`. For the `jsonld_model` field, the example placeholders are determined by the page itself, whereas the template examples will output the field's label. The rendered values are truncated in the notes to avoid excessively long placeholder examples.
 
 By default, the example placeholders only use simple field types such as Text and Integer, as these are easier to represent in a simple example. You can amend the list of fields used for the examples by hooking `MarkupJsonldModels::getExampleFields` (see Hooks section below).
 
@@ -64,13 +69,18 @@ Admin pages and non-HTML responses (JSON, XML, etc.) are automatically excluded 
 The module supports placeholders in the JSON-LD models, which are replaced with dynamic values when the model is output on the front end. The placeholder format uses the same single curly braces format as `WireTextTools::populatePlaceholders()`, and supports most page fields, as well as some custom placeholders provided by the module. For example:
 
 - {page.fieldname} — any page field
+- {page.fieldname|otherfieldname} — any page field with fallback to another field if the first is empty
 - {page.images}, {page.images.first}, {page.images.last}, {page.images.0} — Pageimages with auto-conversion to ImageObject
 - {page.files} / {page.files.first} etc. — Pagefiles → DigitalDocument
 - {setting.foo} — values from setting()
-- {input.httpHostUrl} — Properties from $input are available, and `httpHostUrl` is also available for outputting the full homepage URL.
+- {input.httpHostUrl} — Some properties from $input are available* (restricted for safety), and `httpHostUrl` is also available for outputting the full homepage URL.
 - {breadcrumbList} — auto-generates a BreadcrumbList array
 
+*Available `$input` properties: url, httpUrl, httpHostUrl, scheme, urlSegment1, urlSegment2, urlSegment3, pageNum, pageNumStr, queryString, urlSegmentStr
+
 The module uses `WireTextTools::populatePlaceholders()` to replace placeholders in the models, so you can expect the same behaviour as you would when using that method, with the addition of some custom handling for certain field types (see below). For example, a Page Reference field will resolve to the page ID by default, but you can use hooks to modify this output to include other page data, such as the title or URL.
+
+> ⚠️ As a model must be valid JSON, placeholders should be wrapped in double quotes, even if they should resolve to an array or object. In these cases the enclosing quotes will be stripped when the placeholder is resolved, allowing the output to be an array or object as needed.
 
 #### Custom handling of certain field types
 ##### Pagefile
@@ -119,7 +129,7 @@ Please note that the {breadcrumbList} placeholder should be used within a JSON-L
 #### Notes
 - Date fields (created, modified, published, unpublished, any FieldtypeDatetime) are auto-converted to ISO 8601
 - Numeric/bool placeholders are auto-unquoted in the JSON output
-- If a placeholder resolves to null, it is replaced with an empty string to avoid invalid JSON output
+- If a placeholder resolves to null or empty, the placeholder text is replaced with an empty string. The surrounding JSON key/value pair is preserved — so e.g. `"name": "{page.empty}"` becomes `"name": ""` rather than being removed entirely.
 
 ## Configuration
 You should start configuring your JSON-LD models by first defining a default model in the module settings, then adding models for templates in the list of eligible templates, and finally adding page-specific models where needed.
@@ -173,8 +183,13 @@ The module will output this as:
 }
 ```
 
+Please note that this hard-codes https://schema.org as the outer context. If your model includes multiple objects with different contexts, you should ensure that the individual objects include their own @context property, and the module will preserve these in the output. In other words, do not define your model as a JSON array.
+
 ### $page->jsonldModel
-If the page is eligible, the module adds a property to the page object called `jsonldModel`, which is the final JSON-LD model after placeholders have been replaced, and is what is output in the front end. This can be used in your templates to output the JSON-LD in a custom location, or to modify it further before outputting.
+If the page is eligible for JSON-LD output, `$page->jsonldModel` will return the resolved JSON-LD model for that page, before placeholders are replaced by their dynamic values.
+
+### $page->jsonldOutput
+If the page is eligible, the module adds a property to the page object called `jsonldOutput`, which is the final JSON-LD model after placeholders have been replaced, and is what is output in the front end. This can be used in your templates to output the JSON-LD in a custom location, or to modify it further before outputting.
 
 Accessing this property is useful if you wish to output the model in another location, such as an API endpoint returning page data as JSON.
 
@@ -341,6 +356,7 @@ Here is an example model with various placeholders:
 	"@context": "https://schema.org",
 	"@type": "WebPage",
 	"name": "{page.title}",
+	"headline": "{page.headline|page.title}",
 	"url": "{page.httpUrl}",
 	"image": "{page.images.first}",
 	"file": "{page.files.first}"
@@ -352,21 +368,54 @@ Here is an example of how that model might be rendered on the front end after pl
 	"@context": "https://schema.org",
 	"@type": "WebPage",
 	"name": "Example page title",
+	"headline": "Example page headline",
 	"url": "https://example.com/example-page",
 	"image": {
+		"@context": "https://schema.org",
 		"@type": "ImageObject",
+		"name": "Example image description",
 		"url": "https://example.com/image.jpg",
 		"width": 800,
 		"height": 600
 	},
 	"file": {
+		"@context": "https://schema.org",
 		"@type": "DigitalDocument",
 		"name": "Example file",
 		"contentUrl": "https://example.com/file.pdf",
-		"contentSize": "2MB"
+		"contentSize": "15.2 kB"
 	}
 }
 ```
+
+## Working with Agent Tools
+The module has been designed in part to be used alongside Agent Tools, to allow AI agents to generate JSON-LD models for pages on the site.
+
+### Providing context for AI agents
+The `engineer_instructions` field in the module configuration can be used to provide notes and context for the AI agent to help it generate more accurate and relevant models. When generating JSON-LD models with an AI agent, you can use the module's API to create or update page-specific models, or to modify the default or template models as needed.
+
+The expectation is the an AI agent may update the notes field itself as it learns more about the site and the types of content it contains, so this field can be used as a dynamic source of information for the agent to refer to when generating models.
+
+### Example prompts
+Here are some example prompts you could use with an AI agent to generate JSON-LD models using this module:
+- "MarkupJsonldModels - review default model in the module config"
+- "MarkupJsonldModels - review model for the 'home' template"
+- "MarkupJsonldModels - review model for the '/example-page/' page"
+- "MarkupJsonldModels - generate default model for the site"
+- "MarkupJsonldModels - generate model for page /example-page/"
+- "MarkupJsonldModels - generate model for template example-template"
+- "MarkupJsonldModels - review the notes in the module config"
+
+## Caching
+When `$config->debug` is not enabled, this module implements a simple caching layer to store the resolved JSON-LD models for each page, to improve performance and reduce the processing needed on each page load.
+
+- The cache for a page is automatically cleared when a page is saved.
+- When a template is saved, the cache for all pages using that template is cleared.
+- When the default model in the module config is updated, the cache for all pages is cleared.
+
+You can also trigger the cache to be cleared by clicking the **Clear cache** button on the module config screen.
+
+> ⚠️ If you are updating models programmatically via the API, you should ensure that the cache is cleared after making changes to the models, to ensure the changes are reflected in the output. You can clear the cache by calling `$markupJsonldModels->clearCache()`.
 
 ## Troubleshooting and Debugging
 When logged in as a superuser and `$config->debug` is enabled, if the JSON-LD model is not valid the invalid JSON will be logged to `markup-jsonld-models`.

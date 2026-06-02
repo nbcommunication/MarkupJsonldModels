@@ -9,6 +9,7 @@
  * @license Mozilla Public License v2.0 http://mozilla.org/MPL/2.0/
  *
  * @param string $jsonld_model Default JSON-LD model to use if not set on page or template
+ * @param string $engineer_instructions Notes for Agent Tools to provide context about the site
  *
  */
 
@@ -43,18 +44,49 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 			// Create a custom property so the page's JSON-LD model can be accessed with $page->jsonldModel
 			$this->addHookProperty('Page::jsonldModel', function(HookEvent $event) {
+
 				$page = $event->object;
-				if(!$this->eligibleTemplates()->has($page->template)) {
+				if(!$this->isEligible($page)) {
 					return;
 				}
-				$jsonld = $page->getUnformatted('jsonld_model') ?: $page->template->jsonld_model ?: $this->jsonld_model;
-				$jsonld = $this->populateModel($jsonld, $page);
-				$event->return = $jsonld;
+
+				$event->return = $page->getUnformatted('jsonld_model') ?: $page->template->jsonld_model ?: $this->jsonld_model;
+			});
+
+			// Create a custom property so the populated JSON-LD model can be accessed with $page->jsonldOutput
+			$this->addHookProperty('Page::jsonldOutput', function(HookEvent $event) {
+
+				$page = $event->object;
+				if(!$this->isEligible($page)) {
+					return;
+				}
+
+				$_populate = function() use ($page) {
+					return $this->populateModel($page->jsonldModel, $page);
+				};
+
+				$event->return = $this->wire()->config->debug ?
+					$_populate() :
+					$this->wire()->cache->getFor(
+						$this,
+						"{$page->template->name}.{$page->id}",
+						"id={$page->id}", // expiry by selector so it is automatically cleared when the page is saved
+						$_populate
+					);
 			});
 
 			// If not the admin, add hook to page render to add JSON-LD to the head
 			$this->addHookAfter('Page::render', $this, 'appendJsonldToHead');
 		}
+	}
+
+	/**
+	 * Clear all cached JSON-LD model outputs
+	 *
+	 * @param string $name Optional name to clear specific cache entries (e.g. "templateName.*" to clear all pages for a template, or "templateName.pageId" to clear a specific page)
+	 */
+	public function clearCache($name = '*') {
+		$this->wire()->cache->deleteFor($this, $name);
 	}
 
 	/**
@@ -160,12 +192,18 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 *
 	 * Called internally and from MarkupJsonldModelsConfig
 	 *
+	 * @param bool $overtype If true, also load the Overtype plugin for the engineer_instructions field
+	 *
 	 */
-	public function loadScripts() {
+	public function loadScripts($overtype = false) {
 		$config = $this->wire()->config;
-		$url = $config->urls($this);
+		$url = $config->urls($this) . 'scripts/';
 		$config->scripts->add("{$url}cm6.bundle.min.js");
 		$config->scripts->add("{$url}cm6.init.js");
+		if($overtype) {
+			$config->scripts->add("{$url}overtype.min.js");
+			$config->scripts->add("{$url}overtype.init.js");
+		}
 	}
 
 	/**
@@ -213,8 +251,10 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		}
 
 		return $this->populatePlaceholders($jsonld, $page, [
-			'removeNullTags' => true,
-			'removeEmptyTags' => true,
+			'removeNullTags' => true, // Removes any placeholder tags (e.g. {page.null_field} -> "") that resolve to null
+			'removeEmptyTags' => true, // Removes any placeholder tags (e.g. {page.empty_field} => "") that resolve to an empty string
+			// These options do not remove the key/value pair if the placeholder is resolved to an empty string
+			// For example {"field": "{page.empty_field}"} would resolve to {"field": ""} rather than being removed entirely
 		]);
 	}
 
@@ -229,7 +269,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return [
 			'@context' => 'https://schema.org',
 			'@type' => 'DigitalDocument',
-			'name' => $pagefile->description,
+			'name' => $pagefile->description ?: $pagefile->basename,
 			'contentUrl' => $pagefile->httpUrl,
 			'contentSize' => $pagefile->filesizeStr,
 		];
@@ -246,7 +286,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return [
 			'@context' => 'https://schema.org',
 			'@type' => 'ImageObject',
-			'name' => $pageimage->description,
+			'name' => $pageimage->description ?: $pageimage->basename,
 			'url' => $pageimage->httpUrl,
 			'width' => $pageimage->width,
 			'height' => $pageimage->height,
@@ -283,7 +323,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 			// Check vars and if convert to a string if necessary
 			$placeholderVars = [];
-			if(preg_match_all('/\{' . preg_quote($prefix) . '\.([a-zA-Z0-9_.]+)\}/', $jsonld, $matches)) {
+			if(preg_match_all('/\{' . preg_quote($prefix) . '\.([a-zA-Z0-9_.|]+)\}/', $jsonld, $matches)) {
 
 				$removeQuotes = [];
 				$isPage = $vars instanceof Page;
@@ -307,9 +347,9 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 							$fieldValue = $vars->getUnformatted($fieldName);
 							if($fieldValue instanceof WireArray) {
 								if($index === 'first') {
-									$value = $fieldValue->first();
+									$value = $fieldValue->first() ?: '';
 								} else if($index === 'last') {
-									$value = $fieldValue->last();
+									$value = $fieldValue->last() ?: '';
 								} else {
 									$value = $fieldValue->eq($index) ?: '';
 								}
@@ -465,12 +505,12 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			strpos($html, '</html>') === false ||
 			strpos($html, '</body>') === false ||
 			strpos(substr($html, 0, $headEnd), 'application/ld+json') !== false ||
-			!$this->eligibleTemplates()->has($page->template)
+			!$this->isEligible($page)
 		) {
 			return;
 		}
 
-		$jsonld = trim($page->jsonldModel);
+		$jsonld = trim($page->jsonldOutput);
 		if(empty($jsonld)) {
 			return;
 		}
@@ -563,12 +603,32 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 *
 	 */
 	protected function buildEditTemplateFormSave(HookEvent $event) {
-		$input = $this->wire()->input->post->textarea('jsonld_model');
-		$data = json_decode($input, true) ?? [];
-		if(!empty($input) && empty($data)) {
-			$this->error(sprintf($this->_('Invalid JSON in JSON-LD model — field was cleared. %s'), json_last_error_msg()));
+
+		$input = $this->wire()->input;
+		$template = $event->arguments(0);
+
+		// Only act when the form actually submitted this field
+		if($input->post('jsonld_model') === null) return;
+
+		// Only act on the template that ProcessTemplate is editing
+		$editId = (int) $input->post('id');
+		if($editId && $editId !== $template->id) return;
+
+		if(!$this->eligibleTemplates()->has($template)) return;
+
+		$newModel = $input->post->textarea('jsonld_model');
+		$data = json_decode($newModel, true) ?? [];
+		if(!empty($newModel) && empty($data)) {
+			$this->error(sprintf($this->_('Invalid JSON in JSON-LD model: %s'), json_last_error_msg()));
 		}
-		$event->arguments(0)->set('jsonld_model', is_array($data) && count($data) ? json_encode($data) : '');
+
+		// If the model has changed, clear the cache
+		$currentModel = $template->jsonld_model;
+		if($currentModel !== $newModel) {
+			$this->clearCache("{$template->name}.*");
+		}
+
+		$template->set('jsonld_model', is_array($data) && count($data) ? json_encode($data) : '');
 	}
 
 	/**
@@ -633,6 +693,17 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
+	 * Check if a page is eligible for JSON-LD models based on its template and type
+	 *
+	 * @param Page $page
+	 * @return bool
+	 *
+	 */
+	protected function isEligible(Page $page) {
+		return $this->eligibleTemplates()->has($page->template) && !($page instanceof RepeaterPage);
+	}
+
+	/**
 	 * Install MarkupJsonldModels
 	 *
 	 */
@@ -655,6 +726,8 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 *
 	 */
 	public function ___uninstall() {
+		// Clear cache
+		$this->clearCache();
 		// Remove jsonld_model field if it exists
 		$fields = $this->wire()->fields;
 		$field = $fields->get('jsonld_model');
@@ -667,5 +740,4 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		}
 		$fields->delete($field);
 	}
-
 }

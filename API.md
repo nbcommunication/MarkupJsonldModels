@@ -8,11 +8,14 @@ For details on placeholders, output behaviour, eligible templates, hooks in dept
 
 - [Overview](#overview)
 - [Getting the module instance](#getting-the-module-instance)
+- [Site context notes for AI agents](#site-context-notes-for-ai-agents)
 - [Reading models](#reading-models)
 - [Writing models](#writing-models)
 - [Clearing a model](#clearing-a-model)
 - [Adding the `jsonld_model` field to a template](#adding-the-jsonld_model-field-to-a-template)
+- [Checking placeholder resolution](#checking-placeholder-resolution)
 - [Hookable methods (quick reference)](#hookable-methods-quick-reference)
+- [Non-hookable methods](#other-methods)
 - [See also](#see-also)
 
 ## Overview
@@ -35,14 +38,38 @@ The module is autoloaded. On every front-end render of an eligible page (non-sys
 $markupJsonldModels = $modules->get('MarkupJsonldModels');
 ```
 
+## Site context notes for AI agents
+
+If the Agent Tools module is installed, this module provides a configurable notes field which allows the site owner to provide additional context about the site for AI agents in markdown format. This is stored in the `engineer_instructions` setting on the module and can be accessed via:
+
+```php
+$agentToolsNotes = $modules->getConfig('MarkupJsonldModels', 'engineer_instructions');
+```
+
+An AI Agent may update this field with any additional information it learns about the site. This can be done programmatically via the API:
+
+```php
+$notes = $modules->getConfig('MarkupJsonldModels', 'engineer_instructions');
+$notes .= "\n\nSome new notes about the site.";
+$modules->saveConfig('MarkupJsonldModels', 'engineer_instructions', $notes);
+```
+
 ## Reading models
 
 ### The resolved model for a page
 
-`$page->jsonldModel` returns the **final, placeholder-populated** JSON-LD string for an eligible page, exactly as the module would output it in the head. Returns `null` for pages whose template is not eligible.
+`$page->jsonldModel` returns the resolved JSON-LD string for an eligible page, before placeholders are replaced by their dynamic values. Returns `null` for pages whose template is not eligible.
 
 ```php
-$resolved = $page->jsonldModel;
+$model = $page->jsonldModel;
+```
+
+### The populated model for a page
+
+`$page->jsonldOutput` returns the **final, placeholder-populated** JSON-LD string for an eligible page, exactly as the module would output it in the head. Returns `null` for pages whose template is not eligible.
+
+```php
+$output = $page->jsonldOutput;
 ```
 
 This is the most useful read property when debugging or when you want to embed the model somewhere other than the auto-injected location.
@@ -159,6 +186,17 @@ $templates->save($templateToUpdate);
 $modules->saveConfig('MarkupJsonldModels', 'jsonld_model', '');
 ```
 
+## Clearing the cache
+
+After saving a template or default model via the API, you should also clear the cache. This is because the module caches the resolved model for each page for performance, and these caches are not automatically cleared when you update models via the API.
+
+```php
+$markupJsonldModels = $modules->get('MarkupJsonldModels');
+$markupJsonldModels->clearCache();
+```
+
+Saving a page via the API will automatically clear the cache for that page, so you don't need to do anything extra after updating page-level models.
+
 ## Adding the `jsonld_model` field to a template
 
 For per-page models to work, the `jsonld_model` field must be added to the relevant template's fieldgroup. The field itself is installed automatically when the module is installed, but it is not added to any template by default.
@@ -185,6 +223,68 @@ if($template && $jsonldField && $template->fieldgroup->hasField($jsonldField)) {
 }
 ```
 
+## Checking placeholder resolution
+
+The simplest debugging approach is to compare the raw stored model against the resolved output for a page:
+
+```php
+$page = $pages->get('/path/to/page/');
+
+echo "=== Raw model (with placeholders) ===\n";
+echo $page->jsonldModel . "\n\n";
+
+echo "=== Resolved output (after placeholder replacement) ===\n";
+echo $page->jsonldOutput . "\n";
+```
+
+Any placeholders that resolved to an empty value will show as empty strings (e.g. `"name": ""`) in the resolved output, while placeholders that the module could not match at all will remain in the JSON in their original `{prefix.token}` form. This is usually enough to diagnose model issues.
+
+### Inspecting individual placeholders
+
+For a deeper view of how each placeholder resolves — including array/object placeholders such as `Pageimage` and `Pagefile` — call the non-hookable `populatePlaceholders()` method directly per prefix. Unlike `populateModel()`, this method does not apply the final `removeEmptyTags` / `removeNullTags` / `removeQuotes` passes, so you can distinguish "resolved to empty" from "did not match":
+
+```php
+$page = $pages->get('/path/to/page/');
+$markupJsonldModels = $modules->get('MarkupJsonldModels');
+$model = $page->jsonldModel;
+
+// Each supported prefix has its own placeholder set.
+$prefixes = ['page', 'setting', 'input', 'breadcrumbs'];
+
+foreach($prefixes as $prefix) {
+	if(!preg_match_all('/\{' . preg_quote($prefix) . '\.([a-zA-Z0-9_.|]+)\}/', $model, $m)) continue;
+
+	echo "=== {{$prefix}.*} placeholders ===\n";
+	foreach(array_unique($m[1]) as $token) {
+		$placeholder = '{' . $prefix . '.' . $token . '}';
+		// Pass a single placeholder through populatePlaceholders so we see the raw resolved value.
+		$resolved = $markupJsonldModels->populatePlaceholders($placeholder, $page, [
+			'prefix' => $prefix,
+		]);
+
+		if($resolved === $placeholder) {
+			$display = '(no match — placeholder unchanged)';
+		} else if($resolved === '') {
+			$display = '(resolved to empty)';
+		} else {
+			$display = $resolved;
+		}
+		echo "  $placeholder => $display\n";
+	}
+	echo "\n";
+}
+```
+
+For array-valued placeholders (e.g. `{page.images.first}` resolving via `populatePageimage()` to an `ImageObject` array), `populatePlaceholders()` will substitute a JSON-encoded representation in place of the placeholder. If you want the array form rather than the JSON string, hook `populatePageimage` / `populatePagefile` directly, or read the source field on the page (e.g. `$page->images->first()`) and pass it through `$markupJsonldModels->populatePageimage(...)` yourself.
+
+### Page {page.*} placeholders
+
+Properties on a `Page` object can be set dynamically, via hooks or other mechanisms, so checking whether a field exists on the template is not sufficient to determine if a placeholder may resolve to a value.
+
+### Setting {setting.*} placeholders
+
+The `{setting.*}` placeholders can be checked via `setting('foo')` for the relevant setting key, or accessing all settings via `setting()` with no arguments and checking the resulting array.
+
 ## Hookable methods (quick reference)
 
 All of the following are hookable. Add hooks in `/site/ready.php`. See the [README](README.md#hooks) for full descriptions and examples.
@@ -193,12 +293,35 @@ All of the following are hookable. Add hooks in `/site/ready.php`. See the [READ
 |--------|---------|---------|
 | `MarkupJsonldModels::getTemplates()` | `TemplatesArray` | Templates eligible for JSON-LD models. Default: all non-system templates with `html` (or unset) content type. |
 | `MarkupJsonldModels::getExampleFields(Fieldgroup $fieldgroup, Page $page = null)` | `FieldsArray` | Fields shown as placeholder hints in the admin field notes. |
-| `MarkupJsonldModels::populateModel(string $jsonld, Page $page)` | `string` | The final placeholder-population step. Hook to modify the resolved model before it is rendered. |
+| `MarkupJsonldModels::populateModel(string $jsonld, Page $page)` | `string` | The placeholder-population step. Hook to modify the resolved model before it is rendered. |
 | `MarkupJsonldModels::populatePagefile(Pagefile $pagefile)` | `array` | Conversion of any `Pagefile` placeholder to a `DigitalDocument` array. |
 | `MarkupJsonldModels::populatePageimage(Pageimage $pageimage)` | `array` | Conversion of any `Pageimage` placeholder to an `ImageObject` array. |
 | `MarkupJsonldModels::getBreadcrumbList(Page $page)` | `array` | Items rendered for the `{breadcrumbList}` placeholder. |
 | `MarkupJsonldModels::getBreadcrumbListItem(Page $page, int $position)` | `array` | Shape of an individual breadcrumb `ListItem`. |
 | `MarkupJsonldModels::getBreadcrumbPages(Page $page)` | `PageArray` | Pages included in the breadcrumb list (default: parents + self). |
+
+## Non-hookable methods
+
+```php
+
+$markupJsonldModels = $modules->get('MarkupJsonldModels');
+
+// Clear the module's cache of resolved models for pages
+$markupJsonldModels->clearCache();
+
+// Clear specific cache entries, e.g. for a specific template or page
+$markupJsonldModels->clearCache('templateName.*'); // clear all pages for a template
+$markupJsonldModels->clearCache('templateName.pageId'); // clear a specific page
+
+// Populate placeholders in a JSON-LD string (used internally before rendering)
+$jsonld = '{"@context": "https://schema.org", "@type": "WebPage", "name": "{page.title}"}';
+$populatedJsonld = $markupJsonldModels->populatePlaceholders($jsonld, $page, [
+	'prefix' => 'page', // The prefix for placeholders to populate, e.g. 'page' for {page.title}, 'setting' for {setting.foo}, etc.
+	'truncate' => 100, // optional, truncate resolved values to a certain length
+	// Any other options you want to pass to WireTextTools::populatePlaceholders() can also be passed here and they will be forwarded to that method when the module populates placeholders in the model.
+]);
+
+```
 
 ## See also
 
