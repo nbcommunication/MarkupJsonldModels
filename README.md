@@ -401,9 +401,9 @@ Here are some example prompts you could use with an AI agent to generate JSON-LD
 - "MarkupJsonldModels - review default model in the module config"
 - "MarkupJsonldModels - review model for the 'home' template"
 - "MarkupJsonldModels - review model for the '/example-page/' page"
-- "MarkupJsonldModels - generate default model for the site"
-- "MarkupJsonldModels - generate model for page /example-page/"
-- "MarkupJsonldModels - generate model for template example-template"
+- "MarkupJsonldModels - suggest a default model for the site"
+- "MarkupJsonldModels - suggest a model for template 'example-template'"
+- "MarkupJsonldModels - suggest a model for page /example-page/"
 - "MarkupJsonldModels - review the notes in the module config"
 
 ## Caching
