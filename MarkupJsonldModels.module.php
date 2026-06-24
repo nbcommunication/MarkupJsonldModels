@@ -236,6 +236,13 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			]);
 		}
 
+		// Populate the homepage fields with {home.fieldname} placeholders
+		if(strpos($jsonld, '{home.') !== false) {
+			$jsonld = $this->populatePlaceholders($jsonld, $this->wire()->pages->get(1), [
+				'prefix' => 'home',
+			]);
+		}
+
 		// Populate $page vars
 		if(strpos($jsonld, '{page.') !== false) {
 			$jsonld = $this->populatePlaceholders($jsonld, $page, [
@@ -709,15 +716,16 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 */
 	public function ___install() {
 		// Add jsonld_model field if it doesn't exist
-		$fields = $this->wire()->fields;
-		if(!$fields->get('jsonld_model')) {
-			$fields->new('textarea', 'jsonld_model', [
-				'label' => $this->_('JSON-LD Model'),
-				'icon' => 'code',
-				'contentType' => 0,
-				'collapsed' => 2,
-				'rows' => 20,
-			]);
+		if(!$this->wire()->fields->get('jsonld_model')) {
+			$field = $this->wire(new Field());
+			$field->type = $this->wire()->modules->get('FieldtypeTextarea');
+			$field->name = 'jsonld_model';
+			$field->label = $this->_('JSON-LD Model');
+			$field->icon = 'code';
+			$field->contentType = 0; // text/plain
+			$field->collapsed = 2;
+			$field->rows = 20;
+			$field->save();
 		}
 	}
 

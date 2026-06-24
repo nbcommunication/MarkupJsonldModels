@@ -96,7 +96,11 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 
 		};
 
-		$allModelPages = $pages->find("jsonld_model!=,include=hidden");
+		$modelPagesSelectors = ['include' => 'hidden'];
+		if($this->wire()->fields->get('jsonld_model')) {
+			$modelPagesSelectors['jsonld_model'] = '!=';
+		}
+		$allModelPages = $pages->find($modelPagesSelectors);
 		foreach($markupJsonldModels->getTemplates() as $template) {
 
 			$modelPages = $allModelPages->find("template=$template");
@@ -116,6 +120,7 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 
 			if($byPage) {
 				foreach($modelPages as $page) {
+					if(!$page->jsonld_model) continue;
 					$rows['page'][] = [
 						$page->title,
 						"<a href=\"$page->url\" target=\"_blank\">$page->url</a>",
@@ -130,6 +135,8 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 
 		$out = '';
 		foreach($rows as $type => $typeRows) {
+
+			if(empty($typeRows)) continue;
 
 			usort($typeRows, function($a, $b) {
 				return strcmp($a[0], $b[0]);

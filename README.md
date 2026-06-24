@@ -73,6 +73,7 @@ The module supports placeholders in the JSON-LD models, which are replaced with 
 - {page.images}, {page.images.first}, {page.images.last}, {page.images.0} — Pageimages with auto-conversion to ImageObject
 - {page.files} / {page.files.first} etc. — Pagefiles → DigitalDocument
 - {setting.foo} — values from setting()
+- {home.fieldname} — fields from the homepage, e.g. {home.title} or {home.httpUrl}
 - {input.httpHostUrl} — Some properties from $input are available* (restricted for safety), and `httpHostUrl` is also available for outputting the full homepage URL.
 - {breadcrumbList} — auto-generates a BreadcrumbList array
 
