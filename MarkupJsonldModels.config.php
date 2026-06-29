@@ -16,6 +16,7 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 	public function getDefaults() {
 		return [
 			'jsonld_model' => '',
+			'placeholders_ignore' => 'search_term_string',
 			'engineer_instructions' => '',
 		];
 	}
@@ -54,6 +55,15 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 			'notes' => $this->_('For instructions on how to define a JSON-LD model with placeholders, please refer to the README.'),
 			'icon' => 'code',
 			'rows' => 20,
+		]);
+
+		$inputfields->add([
+			'type' => 'textarea',
+			'name' => 'placeholders_ignore',
+			'label' => $this->_('Placeholders to Ignore'),
+			'description' => $this->_('Enter a list of placeholder names that should be ignored (left as they are in your model) when generating JSON-LD models.'),
+			'notes' => $this->_('Please enter one placeholder name per line.'),
+			'icon' => 'leaf',
 		]);
 
 		$inputfields->add([

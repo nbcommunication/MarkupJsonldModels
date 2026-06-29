@@ -9,6 +9,7 @@
  * @license Mozilla Public License v2.0 http://mozilla.org/MPL/2.0/
  *
  * @param string $jsonld_model Default JSON-LD model to use if not set on page or template
+ * @param string $placeholders_ignore List of placeholder names to ignore (not populate) when generating JSON-LD models
  * @param string $engineer_instructions Notes for Agent Tools to provide context about the site
  *
  */
@@ -116,7 +117,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return [
 			'@type' => 'ListItem',
 			'position' => $position,
-			'name' => $page->getUnformatted('title'),
+			'name' => $page->title,
 			'item' => $page->httpUrl,
 		];
 	}
@@ -220,6 +221,17 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			return $jsonld;
 		}
 
+		$ignorePlaceholders = array_filter(array_map('trim', explode("\n", $this->placeholders_ignore)));
+		if(count($ignorePlaceholders)) {
+			foreach($ignorePlaceholders as $placeholder) {
+				$jsonld = str_replace(
+					'{' . $placeholder . '}',
+					'[[' . $placeholder . ']]', // temporarily replace with square braces to avoid being populated
+					$jsonld
+				);
+			}
+		}
+
 		// Populate Page breadcrumb items
 		if(strpos($jsonld, '{breadcrumbList}') !== false) {
 			$jsonld = str_replace(
@@ -257,12 +269,25 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			]);
 		}
 
-		return $this->populatePlaceholders($jsonld, $page, [
+		$jsonldModel = $this->populatePlaceholders($jsonld, $page, [
 			'removeNullTags' => true, // Removes any placeholder tags (e.g. {page.null_field} -> "") that resolve to null
 			'removeEmptyTags' => true, // Removes any placeholder tags (e.g. {page.empty_field} => "") that resolve to an empty string
 			// These options do not remove the key/value pair if the placeholder is resolved to an empty string
 			// For example {"field": "{page.empty_field}"} would resolve to {"field": ""} rather than being removed entirely
 		]);
+
+		// Restore any ignored placeholders back to their original form
+		if(count($ignorePlaceholders)) {
+			foreach($ignorePlaceholders as $placeholder) {
+				$jsonldModel = str_replace(
+					'[[' . $placeholder . ']]',
+					'{' . $placeholder . '}',
+					$jsonldModel
+				);
+			}
+		}
+
+		return $jsonldModel;
 	}
 
 	/**
