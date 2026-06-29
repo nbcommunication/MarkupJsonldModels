@@ -236,7 +236,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		if(strpos($jsonld, '{breadcrumbList}') !== false) {
 			$jsonld = str_replace(
 				'"{breadcrumbList}"',
-				json_encode($this->getBreadcrumbList($page)),
+				$this->jsonEncode($this->getBreadcrumbList($page)),
 				$jsonld
 			);
 		}
@@ -287,7 +287,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			}
 		}
 
-		return $jsonldModel;
+		return $this->wire()->sanitizer->unentities($jsonldModel, true);
 	}
 
 	/**
@@ -413,7 +413,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 								$removeQuotes[] = $key;
 								$value = $value->count ?
-									json_encode(array_values($value->explode(function($pageimage) {
+									$this->jsonEncode(array_values($value->explode(function($pageimage) {
 										return $this->populatePageimage($pageimage);
 									}))) :
 									'[]';
@@ -421,13 +421,13 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 							} else if($value instanceof Pageimage) {
 
 								$removeQuotes[] = $key;
-								$value = json_encode($this->populatePageimage($value));
+								$value = $this->jsonEncode($this->populatePageimage($value));
 
 							} else if($value instanceof Pagefiles) {
 
 								$removeQuotes[] = $key;
 								$value = $value->count ?
-									json_encode(array_values($value->explode(function($pagefile) {
+									$this->jsonEncode(array_values($value->explode(function($pagefile) {
 										return $this->populatePagefile($pagefile);
 									}))) :
 									'[]';
@@ -435,12 +435,12 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 							} else if($value instanceof Pagefile) {
 
 								$removeQuotes[] = $key;
-								$value = json_encode($this->populatePagefile($value));
+								$value = $this->jsonEncode($this->populatePagefile($value));
 
 							} else if(method_exists($value, 'jsonSerialize')) {
 
 								$removeQuotes[] = $key;
-								$value = json_encode($value->jsonSerialize());
+								$value = $this->jsonEncode($value->jsonSerialize());
 
 							} else if(method_exists($value, '__toString')) {
 
@@ -449,13 +449,13 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 							} else {
 
 								$removeQuotes[] = $key;
-								$value = json_encode(get_object_vars($value));
+								$value = $this->jsonEncode(get_object_vars($value));
 							}
 
 						} else if(is_array($value)) {
 
 							$removeQuotes[] = $key;
-							$value = json_encode($value);
+							$value = $this->jsonEncode($value);
 
 						} else if(in_array($field, ['created', 'modified', 'published', 'unpublished'])) {
 
@@ -565,7 +565,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			'</head>',
 			'<script type="application/ld+json">' .
 				($this->wire()->user->isSuperUser() ?
-					json_encode($data, JSON_PRETTY_PRINT) :
+					$this->jsonEncode($data) :
 					$jsonld
 				) .
 			'</script>' .
@@ -660,7 +660,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			$this->clearCache("{$template->name}.*");
 		}
 
-		$template->set('jsonld_model', is_array($data) && count($data) ? json_encode($data) : '');
+		$template->set('jsonld_model', is_array($data) && count($data) ? json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : '');
 	}
 
 	/**
@@ -733,6 +733,22 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 */
 	protected function isEligible(Page $page) {
 		return $this->eligibleTemplates()->has($page->template) && !($page instanceof RepeaterPage);
+	}
+
+	/**
+	 * Encode data as JSON with options based on user permissions
+	 *
+	 * @param array $data
+	 * @return string
+	 *
+	 */
+	protected function jsonEncode(array $data) {
+		return json_encode(
+			$data,
+			$this->wire()->user->isSuperUser() ?
+				JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT :
+				JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+		);
 	}
 
 	/**
