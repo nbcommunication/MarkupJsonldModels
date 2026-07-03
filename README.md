@@ -283,6 +283,40 @@ $wire->addHookAfter('MarkupJsonldModels::populateModel', function(HookEvent $eve
 });
 ```
 
+Implement a settings page as a placeholder type:
+```php
+$wire->addHookBefore('MarkupJsonldModels::populateModel', function(HookEvent $event) {
+	$jsonld = $event->arguments(0);
+	$page = $event->arguments(1);
+	$pageSettings = $event->wire()->pages->get('/settings');
+	if(strpos($jsonld, '{pageSettings.') !== false) {
+		$jsonld = $event->object->populatePlaceholders($jsonld, $pageSettings, [
+			'prefix' => 'pageSettings',
+		]);
+	}
+	$event->arguments(0, $jsonld);
+});
+```
+
+Implement a module (e.g. a site settings module) as a placeholder type:
+```php
+$wire->addHookBefore('MarkupJsonldModels::populateModel', function(HookEvent $event) {
+	$jsonld = $event->arguments(0);
+	$page = $event->arguments(1);
+	// If wired
+	$siteSettings = $event->wire()->siteSettings;
+	// If not wired
+	$siteSettings = $event->wire()->modules->get('siteSettings');
+
+	if(strpos($jsonld, '{siteSettings.') !== false) {
+		$jsonld = $event->object->populatePlaceholders($jsonld, $siteSettings, [
+			'prefix' => 'siteSettings',
+		]);
+	}
+	$event->arguments(0, $jsonld);
+});
+```
+
 #### MarkupJsonldModels::populatePagefile()
 Change the output of a `Pagefile` placeholder:
 ```php
