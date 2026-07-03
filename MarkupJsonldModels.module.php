@@ -5,12 +5,28 @@
  *
  * #pw-summary Allows defining JSON-LD models on a per-page and per-template basis with placeholder support.
  *
+ * #pw-var $markupJsonldModels
+ *
+ * #pw-instantiate $markupJsonldModels = $modules->get('MarkupJsonldModels');
+ *
+ * #pw-body =
+ * JSON-LD models are stored as compact JSON strings and resolved per page,
+ * with placeholders (e.g. `{page.title}`) populated dynamically at render time.
+ * Models are resolved in the order: page > template > default.
+ *
+ * ~~~~~
+ * $markupJsonldModels = $modules->get('MarkupJsonldModels');
+ * ~~~~~
+ *
+ * See the API.md and README.md files in the module directory for full documentation.
+ * #pw-body
+ *
  * @copyright 2026 NB Communication Ltd
  * @license Mozilla Public License v2.0 http://mozilla.org/MPL/2.0/
  *
- * @param string $jsonld_model Default JSON-LD model to use if not set on page or template
- * @param string $placeholders_ignore List of placeholder names to ignore (not populate) when generating JSON-LD models
- * @param string $engineer_instructions Notes for Agent Tools to provide context about the site
+ * @property string $jsonld_model Default JSON-LD model to use if not set on page or template
+ * @property string $placeholders_ignore List of placeholder names to ignore (not populate) when generating JSON-LD models
+ * @property string $engineer_instructions Notes for Agent Tools to provide context about the site
  *
  */
 
@@ -117,7 +133,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return [
 			'@type' => 'ListItem',
 			'position' => $position,
-			'name' => $page->title,
+			'name' => $page->title ?: $page->name,
 			'item' => $page->httpUrl,
 		];
 	}
@@ -159,7 +175,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 				}
 				if($page && $page->id) {
 					$valueRaw = $page->getUnformatted($field->name);
-					if(empty($valueRaw) || ($valueRaw instanceof WireArray && !$valueRaw->count())) continue;
+					if($valueRaw === null || $valueRaw === '' || ($valueRaw instanceof WireArray && !$valueRaw->count())) continue;
 				}
 				$exampleFields->add($field);
 			}
@@ -548,7 +564,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		}
 
 		// An array of JSON-LD objects should be wrapped in a @graph
-		if(isset($jsonld[0]) && $jsonld[0] === '[' && substr($jsonld, -1) === ']') {
+		if(isset($jsonld[0]) && $jsonld[0] === '[' && substr($jsonld, -1) === ']' && trim($jsonld) !== '[]') {
 			$jsonld = "{\"@context\":\"https://schema.org\",\"@graph\":$jsonld}";
 		}
 
