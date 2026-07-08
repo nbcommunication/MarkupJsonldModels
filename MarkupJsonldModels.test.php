@@ -151,6 +151,25 @@ class WireTest_MarkupJsonldModels extends WireTest {
 		$decoded = json_decode($out, true);
 		$this->check('populateModel() expands {breadcrumbList} to array', true, isset($decoded['itemListElement']) && is_array($decoded['itemListElement']));
 
+		// --- populateModel() decodes HTML entities (e.g. &amp; -> &) ---
+		$json = '{"@type":"WebPage","name":"Fish &amp; Chips"}';
+		$out = $mod->populateModel($json, $page);
+		$decoded = json_decode($out, true);
+		$this->check('populateModel() produces valid JSON when decoding entities', true, is_array($decoded));
+		$this->check('populateModel() decodes HTML entities (&amp; -> &)', 'Fish & Chips', $decoded['name'] ?? null);
+
+		// --- populateModel() escapes double quotes found inside string values ---
+		$page->of(false);
+		$page->title = 'Say "Hello" World';
+		$page->save('title');
+		$json = '{"name":"{page.title}"}';
+		$out = $mod->populateModel($json, $page);
+		$decoded = json_decode($out, true);
+		$this->check('populateModel() produces valid JSON when value contains quotes', true, is_array($decoded));
+		$this->check('populateModel() escapes double quotes inside string values', 'Say "Hello" World', $decoded['name'] ?? null);
+		// restore title
+		$page->title = 'JSON-LD Test Page';
+		$page->save('title');
 		// --- Page::jsonldModel precedence ---
 		$page->of(false);
 		$page->set('jsonld_model', '{"@type":"Article"}');
