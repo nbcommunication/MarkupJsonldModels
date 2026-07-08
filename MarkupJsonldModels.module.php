@@ -303,7 +303,54 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			}
 		}
 
-		return $this->wire()->sanitizer->unentities($jsonldModel, true);
+		$jsonldModel = $this->wire()->sanitizer->unentities($jsonldModel);
+
+		// Escape any unescaped quotes in the JSON-LD model to avoid breaking the JSON output
+
+		$len = strlen($jsonldModel);
+		$out = '';
+		$inString = false;
+		$i = 0;
+
+		while ($i < $len) {
+			$ch = $jsonldModel[$i];
+
+			// preserve existing escape sequences untouched
+			if ($ch === '\\' && $inString) {
+				$out .= $ch;
+				$i++;
+				if ($i < $len) { $out .= $jsonldModel[$i]; $i++; }
+				continue;
+			}
+
+			if ($ch === '"') {
+				if (!$inString) {
+					$inString = true;
+					$out .= $ch;
+					$i++;
+					continue;
+				}
+
+				// inside a string, hit an unescaped quote — is it a real closer?
+				$j = $i + 1;
+				while ($j < $len && ctype_space($jsonldModel[$j])) $j++;
+				$next = $j < $len ? $jsonldModel[$j] : null;
+
+				if ($next === null || strpos(',}]:', $next) !== false) {
+					$inString = false; // genuine end of value/key
+					$out .= $ch;
+				} else {
+					$out .= '\\"'; // literal quote in content — escape it
+				}
+				$i++;
+				continue;
+			}
+
+			$out .= $ch;
+			$i++;
+		}
+
+		return $out;
 	}
 
 	/**
@@ -529,6 +576,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return $this->wire()->sanitizer->getTextTools()->populatePlaceholders($jsonld, $vars, array_merge([
 			'removeNullTags' => false,
 			'removeEmptyTags' => false,
+			'entityDecode' => true,
 		], $options));
 	}
 
@@ -676,7 +724,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			$this->clearCache("{$template->name}.*");
 		}
 
-		$template->set('jsonld_model', is_array($data) && count($data) ? json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : '');
+		$template->set('jsonld_model', is_array($data) && count($data) ? json_encode($data, JSON_UNESCAPED_UNICODE) : '');
 	}
 
 	/**
@@ -762,8 +810,8 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return json_encode(
 			$data,
 			$this->wire()->user->isSuperUser() ?
-				JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT :
-				JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+				JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT :
+				JSON_UNESCAPED_UNICODE
 		);
 	}
 
