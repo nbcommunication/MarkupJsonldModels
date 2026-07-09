@@ -616,6 +616,19 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			$jsonld = "{\"@context\":\"https://schema.org\",\"@graph\":$jsonld}";
 		}
 
+		// Replace any control characters in the JSON-LD model with their escaped equivalents to avoid breaking the JSON output
+		$jsonld = preg_replace_callback('/[\x00-\x1F\x7F]/', function($matches) {
+			$char = $matches[0];
+			switch($char) {
+				case "\b": return '\\b';
+				case "\f": return '\\f';
+				case "\n": return '\\n';
+				case "\r": return '\\r';
+				case "\t": return '\\t';
+				default: return sprintf('\\u%04x', ord($char));
+			}
+		}, $jsonld);
+
 		$data = json_decode($jsonld, true);
 		if($data === null && json_last_error() !== JSON_ERROR_NONE) {
 			$files = $this->wire()->files;
