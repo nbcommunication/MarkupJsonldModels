@@ -648,7 +648,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			'</head>',
 			'<script type="application/ld+json">' .
 				($this->wire()->user->isSuperUser() ?
-					$this->jsonEncode($data) :
+					$this->jsonEncode($data, true) :
 					$jsonld
 				) .
 			'</script>' .
@@ -822,13 +822,14 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 * Encode data as JSON with options based on user permissions
 	 *
 	 * @param array $data
+	 * @param bool $prettyPrint
 	 * @return string
 	 *
 	 */
-	protected function jsonEncode(array $data) {
+	protected function jsonEncode(array $data, $prettyPrint = false) {
 		return json_encode(
 			$data,
-			$this->wire()->user->isSuperUser() ?
+			$this->wire()->user->isSuperUser() && $prettyPrint ?
 				JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT :
 				JSON_UNESCAPED_UNICODE
 		);
