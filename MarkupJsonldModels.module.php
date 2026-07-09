@@ -618,9 +618,15 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		$data = json_decode($jsonld, true);
 		if($data === null && json_last_error() !== JSON_ERROR_NONE) {
-			if($this->wire()->config->debug && $this->wire()->user->isSuperUser()) {
-				$this->log(sprintf($this->_('Invalid JSON-LD model for page %1$d: %2$s - %3$s'), $page->id, json_last_error_msg(), $jsonld));
+			$files = $this->wire()->files;
+			$logDir = $this->wire()->config->paths->assets . ".{$this->className}";
+			if(!$files->exists($logDir)) {
+				$files->mkdir($logDir);
 			}
+			$now = date('YmdHis');
+			$logFile = "$logDir/invalid-jsonld-{$page->template->name}-{$page->id}-$now.txt";
+			$files->filePutContents($logFile, $jsonld);
+			$this->log(sprintf($this->_('Invalid JSON-LD model for page %1$d: %2$s. Result logged to %3$s'), $page->id, json_last_error_msg(), $logFile));
 			return;
 		}
 		if(empty($data)) return; // empty but valid - silently skip

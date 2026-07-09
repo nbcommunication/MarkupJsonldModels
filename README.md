@@ -453,7 +453,7 @@ You can also trigger the cache to be cleared by clicking the **Clear cache** but
 > ⚠️ If you are updating models programmatically via the API, you should ensure that the cache is cleared after making changes to the models, to ensure the changes are reflected in the output. You can clear the cache by calling `$markupJsonldModels->clearCache()`.
 
 ## Troubleshooting and Debugging
-When logged in as a superuser and `$config->debug` is enabled, if the JSON-LD model is not valid the invalid JSON will be logged to `markup-jsonld-models`.
+If the JSON-LD model is not valid the invalid JSON will be logged to `/site/assets/.MarkupJsonldModels/invalid-jsonld-{page->template->name}-{page->id}-{now}.txt` and the error will be recorded in the module log (`markup-jsonld-models`).
 
 If a model is not output on the front end as expected, you can check the following:
 - Check the page is eligible for JSON-LD output (is rendered as HTML, has a model defined, and does not already have a JSON-LD script in the head).

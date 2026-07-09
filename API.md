@@ -36,7 +36,7 @@ When the module renders JSON-LD for a page it resolves the model in this order: 
 
 The module is autoloaded. On every front-end render of an eligible page it resolves placeholders and injects the result as a `<script type="application/ld+json">` tag immediately before `</head>`. A page is eligible when its template is non-system with an `html` (or unset) content type and the page is not a [[RepeaterPage]]. Injection additionally requires that the rendered markup contains `</head>`, `</body>` and `</html>`, and has no existing `application/ld+json` script within the `<head>`.
 
-> ⚠️ The admin field validates JSON via CodeMirror, but **the API does not**. When setting `jsonld_model` programmatically you are responsible for storing valid JSON. Invalid JSON will simply not be rendered (and is logged for superusers when `$config->debug` is true).
+> ⚠️ The admin field validates JSON via CodeMirror, but **the API does not**. When setting `jsonld_model` programmatically you are responsible for storing valid JSON. Invalid JSON will simply not be rendered.
 
 ## Site context notes for AI agents
 
@@ -364,7 +364,7 @@ $populatedJsonld = $markupJsonldModels->populatePlaceholders($jsonld, $page, [
 - This module is autoloaded. Retrieve an instance with `$modules->get('MarkupJsonldModels')`.
 - The `jsonld_model` field is installed with the module but is not added to any template by default.
 - Model resolution precedence is page > template > default; an empty value falls through to the next level.
-- The API does not validate JSON — invalid JSON is silently skipped at render (and logged for superusers when `$config->debug` is true).
+- The API does not validate JSON — invalid JSON is silently skipped at render (and logged for review).
 - When `$config->debug` is true, `$page->jsonldOutput` bypasses the resolved-model cache and is recomputed on every request.
 - Readable/writable module config keys include `jsonld_model` (default model), `placeholders_ignore` (newline-separated placeholder names left un-populated) and `engineer_instructions` (AI agent site notes).
 
