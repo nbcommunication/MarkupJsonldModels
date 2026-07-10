@@ -50,6 +50,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			switch((string) $page->process) {
 				case 'ProcessPageEdit':
 					$this->addHookAfter('ProcessPageEdit::buildForm', $this, 'buildEditPageForm');
+					$this->addHookBefore('Pages::save', $this, 'buildEditPageFormSave');
 					break;
 				case 'ProcessTemplate':
 					$this->addHookAfter('ProcessTemplate::buildEditForm', $this, 'buildEditTemplateForm');
@@ -107,6 +108,30 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
+	 * Prepare a value for JSON-LD output
+	 *
+	 * @param array|string $value
+	 * @return string
+	 *
+	 */
+	public function encodeValue(array|string $value) {
+
+		$_encode = function($value) {
+			return json_encode($value, JSON_UNESCAPED_UNICODE);
+		};
+
+		if(is_string($value)) {
+			$value = $this->unentities(trim($value));
+			$value = $_encode($value);
+			$value = substr($value, 1, -1);
+		} else {
+			$value = $_encode($value);
+		}
+
+		return $value;
+	}
+
+	/**
 	 * Get breadcrumb list for a page in JSON-LD format
 	 *
 	 * @param Page $page
@@ -133,7 +158,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return [
 			'@type' => 'ListItem',
 			'position' => $position,
-			'name' => $page->title ?: $page->name,
+			'name' => $this->unentities($page->title ?: $page->name),
 			'item' => $page->httpUrl,
 		];
 	}
@@ -252,7 +277,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		if(strpos($jsonld, '{breadcrumbList}') !== false) {
 			$jsonld = str_replace(
 				'"{breadcrumbList}"',
-				$this->jsonEncode($this->getBreadcrumbList($page)),
+				$this->encodeValue($this->getBreadcrumbList($page)),
 				$jsonld
 			);
 		}
@@ -285,7 +310,8 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			]);
 		}
 
-		$jsonldModel = $this->populatePlaceholders($jsonld, $page, [
+		// Remove any placeholder tags that do not resolve
+		$jsonldModel = $this->populatePlaceholders($jsonld, [], [
 			'removeNullTags' => true, // Removes any placeholder tags (e.g. {page.null_field} -> "") that resolve to null
 			'removeEmptyTags' => true, // Removes any placeholder tags (e.g. {page.empty_field} => "") that resolve to an empty string
 			// These options do not remove the key/value pair if the placeholder is resolved to an empty string
@@ -303,54 +329,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			}
 		}
 
-		$jsonldModel = $this->wire()->sanitizer->unentities($jsonldModel);
-
-		// Escape any unescaped quotes in the JSON-LD model to avoid breaking the JSON output
-
-		$len = strlen($jsonldModel);
-		$out = '';
-		$inString = false;
-		$i = 0;
-
-		while ($i < $len) {
-			$ch = $jsonldModel[$i];
-
-			// preserve existing escape sequences untouched
-			if ($ch === '\\' && $inString) {
-				$out .= $ch;
-				$i++;
-				if ($i < $len) { $out .= $jsonldModel[$i]; $i++; }
-				continue;
-			}
-
-			if ($ch === '"') {
-				if (!$inString) {
-					$inString = true;
-					$out .= $ch;
-					$i++;
-					continue;
-				}
-
-				// inside a string, hit an unescaped quote — is it a real closer?
-				$j = $i + 1;
-				while ($j < $len && ctype_space($jsonldModel[$j])) $j++;
-				$next = $j < $len ? $jsonldModel[$j] : null;
-
-				if ($next === null || strpos(',}]:', $next) !== false) {
-					$inString = false; // genuine end of value/key
-					$out .= $ch;
-				} else {
-					$out .= '\\"'; // literal quote in content — escape it
-				}
-				$i++;
-				continue;
-			}
-
-			$out .= $ch;
-			$i++;
-		}
-
-		return $out;
+		return $this->unentities($jsonldModel);
 	}
 
 	/**
@@ -364,7 +343,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return [
 			'@context' => 'https://schema.org',
 			'@type' => 'DigitalDocument',
-			'name' => $pagefile->description ?: $pagefile->basename,
+			'name' => $this->unentities($pagefile->description ?: $pagefile->basename),
 			'contentUrl' => $pagefile->httpUrl,
 			'contentSize' => $pagefile->filesizeStr,
 		];
@@ -381,7 +360,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 		return [
 			'@context' => 'https://schema.org',
 			'@type' => 'ImageObject',
-			'name' => $pageimage->description ?: $pageimage->basename,
+			'name' => $this->unentities($pageimage->description ?: $pageimage->basename),
 			'url' => $pageimage->httpUrl,
 			'width' => $pageimage->width,
 			'height' => $pageimage->height,
@@ -452,7 +431,8 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 								$value = '';
 							}
 						} else {
-							$value = $vars->getUnformatted($field);
+
+							$value = $vars->get($field);
 						}
 
 					} else if($isInput) {
@@ -467,81 +447,88 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 						$value = $vars[$field];
 					}
 
-					if($value !== '' && !is_string($value)) {
+					if($value !== '') {
 
-						$key = "{$prefix}.{$field}";
-						if(is_object($value)) {
+						if(is_string($value)) {
 
-							if($value instanceof Pageimages) {
-
-								$removeQuotes[] = $key;
-								$value = $value->count ?
-									$this->jsonEncode(array_values($value->explode(function($pageimage) {
-										return $this->populatePageimage($pageimage);
-									}))) :
-									'[]';
-
-							} else if($value instanceof Pageimage) {
-
-								$removeQuotes[] = $key;
-								$value = $this->jsonEncode($this->populatePageimage($value));
-
-							} else if($value instanceof Pagefiles) {
-
-								$removeQuotes[] = $key;
-								$value = $value->count ?
-									$this->jsonEncode(array_values($value->explode(function($pagefile) {
-										return $this->populatePagefile($pagefile);
-									}))) :
-									'[]';
-
-							} else if($value instanceof Pagefile) {
-
-								$removeQuotes[] = $key;
-								$value = $this->jsonEncode($this->populatePagefile($value));
-
-							} else if(method_exists($value, 'jsonSerialize')) {
-
-								$removeQuotes[] = $key;
-								$value = $this->jsonEncode($value->jsonSerialize());
-
-							} else if(method_exists($value, '__toString')) {
-
-								$value = (string) $value;
-
-							} else {
-
-								$removeQuotes[] = $key;
-								$value = $this->jsonEncode(get_object_vars($value));
-							}
-
-						} else if(is_array($value)) {
-
-							$removeQuotes[] = $key;
-							$value = $this->jsonEncode($value);
-
-						} else if(in_array($field, ['created', 'modified', 'published', 'unpublished'])) {
-
-							// If the field is a system date field, convert to ISO 8601 format for JSON-LD
-							$value = date('c', $value);
-
-						} else if(is_int($value) && $isPage && ($f = $vars->getField($field)) && $f->type instanceof FieldtypeDatetime) {
-
-							// If the field is a date field, convert to ISO 8601 format for JSON-LD
-							$value = date('c', $value);
-
-						} else if(is_bool($value)) {
-
-							$removeQuotes[] = $key;
-							$value = $value ? 'true' : 'false';
-
-						} else if(is_null($value)) {
-
-							$value = '';
+							$value = $this->encodeValue($value);
 
 						} else {
 
-							$removeQuotes[] = $key; // int, float should not be quoted in the JSON-LD output
+							$key = "{$prefix}.{$field}";
+							if(is_object($value)) {
+
+								if($value instanceof Pageimages) {
+
+									$removeQuotes[] = $key;
+									$value = $value->count ?
+										$this->encodeValue(array_values($value->explode(function($pageimage) {
+											return $this->populatePageimage($pageimage);
+										}))) :
+										'[]';
+
+								} else if($value instanceof Pageimage) {
+
+									$removeQuotes[] = $key;
+									$value = $this->encodeValue($this->populatePageimage($value));
+
+								} else if($value instanceof Pagefiles) {
+
+									$removeQuotes[] = $key;
+									$value = $value->count ?
+										$this->encodeValue(array_values($value->explode(function($pagefile) {
+											return $this->populatePagefile($pagefile);
+										}))) :
+										'[]';
+
+								} else if($value instanceof Pagefile) {
+
+									$removeQuotes[] = $key;
+									$value = $this->encodeValue($this->populatePagefile($value));
+
+								} else if(method_exists($value, 'jsonSerialize')) {
+
+									$removeQuotes[] = $key;
+									$value = $this->encodeValue($value->jsonSerialize());
+
+								} else if(method_exists($value, '__toString')) {
+
+									$value = $this->encodeValue((string) $value);
+
+								} else {
+
+									$removeQuotes[] = $key;
+									$value = $this->encodeValue(get_object_vars($value));
+								}
+
+							} else if(is_array($value)) {
+
+								$removeQuotes[] = $key;
+								$value = $this->encodeValue($value);
+
+							} else if(in_array($field, ['created', 'modified', 'published', 'unpublished'])) {
+
+								// If the field is a system date field, convert to ISO 8601 format for JSON-LD
+								$value = date('c', $value);
+
+							} else if(is_int($value) && $isPage && ($f = $vars->getField($field)) && $f->type instanceof FieldtypeDatetime) {
+
+								// If the field is a date field, convert to ISO 8601 format for JSON-LD
+								$value = date('c', $value);
+
+							} else if(is_bool($value)) {
+
+								$removeQuotes[] = $key;
+								$value = $value ? 'true' : 'false';
+
+							} else if(is_null($value)) {
+
+								$value = '';
+
+							} else {
+
+								$removeQuotes[] = $key; // int, float should not be quoted in the JSON-LD output
+							}
 						}
 					}
 
@@ -581,6 +568,17 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
+	 * Decode HTML entities in a string
+	 *
+	 * @param string $str
+	 * @return string
+	 *
+	 */
+	public function unentities(string $str) {
+		return $this->wire()->sanitizer->unentities($str);
+	}
+
+	/**
 	 * Append JSON-LD script to the head of the page if a model is defined
 	 *
 	 * @param HookEvent $event
@@ -611,12 +609,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			return;
 		}
 
-		// An array of JSON-LD objects should be wrapped in a @graph
-		if(isset($jsonld[0]) && $jsonld[0] === '[' && substr($jsonld, -1) === ']' && trim($jsonld) !== '[]') {
-			$jsonld = "{\"@context\":\"https://schema.org\",\"@graph\":$jsonld}";
-		}
-
-		// Replace any control characters in the JSON-LD model with their escaped equivalents to avoid breaking the JSON output
+		// // Escape any control characters in the JSON-LD model to avoid breaking the JSON output
 		$jsonld = preg_replace_callback('/[\x00-\x1F\x7F]/', function($matches) {
 			$char = $matches[0];
 			switch($char) {
@@ -628,6 +621,11 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 				default: return sprintf('\\u%04x', ord($char));
 			}
 		}, $jsonld);
+
+		// An array of JSON-LD objects should be wrapped in a @graph
+		if(isset($jsonld[0]) && $jsonld[0] === '[' && substr($jsonld, -1) === ']' && trim($jsonld) !== '[]') {
+			$jsonld = "{\"@context\":\"https://schema.org\",\"@graph\":$jsonld}";
+		}
 
 		$data = json_decode($jsonld, true);
 		if($data === null && json_last_error() !== JSON_ERROR_NONE) {
@@ -648,13 +646,32 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			'</head>',
 			'<script type="application/ld+json">' .
 				($this->wire()->user->isSuperUser() ?
-					$this->jsonEncode($data, true) :
+					json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) :
 					$jsonld
 				) .
 			'</script>' .
 			'</head>',
 			$html
 		);
+	}
+
+	/**
+	 * Validate the JSON-LD model when the Page edit form is saved
+	 *
+	 * @param HookEvent $event
+	 *
+	 */
+	protected function buildEditPageFormSave(HookEvent $event) {
+
+		$input = $this->wire()->input;
+		$page = $event->arguments(0);
+
+		// Only act when the form actually submitted this field
+		if($input->post('jsonld_model') === null) return;
+
+		if(!$this->isEligible($page)) return;
+
+		$this->validateAndSaveModel($page, "{$page->template->name}.{$page->id}");
 	}
 
 	/**
@@ -731,19 +748,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		if(!$this->eligibleTemplates()->has($template)) return;
 
-		$newModel = $input->post->textarea('jsonld_model');
-		$data = json_decode($newModel, true) ?? [];
-		if(!empty($newModel) && empty($data)) {
-			$this->error(sprintf($this->_('Invalid JSON in JSON-LD model: %s'), json_last_error_msg()));
-		}
-
-		// If the model has changed, clear the cache
-		$currentModel = $template->jsonld_model;
-		if($currentModel !== $newModel) {
-			$this->clearCache("{$template->name}.*");
-		}
-
-		$template->set('jsonld_model', is_array($data) && count($data) ? json_encode($data, JSON_UNESCAPED_UNICODE) : '');
+		$this->validateAndSaveModel($template, "{$template->name}.*");
 	}
 
 	/**
@@ -819,20 +824,32 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
-	 * Encode data as JSON with options based on user permissions
+	 * Validate and save the JSON-LD model for a page or template
 	 *
-	 * @param array $data
-	 * @param bool $prettyPrint
-	 * @return string
+	 * @param Page|Template $pageOrTemplate
+	 * @param string $cacheName Optional cache name to clear if the model has changed
 	 *
 	 */
-	protected function jsonEncode(array $data, $prettyPrint = false) {
-		return json_encode(
-			$data,
-			$this->wire()->user->isSuperUser() && $prettyPrint ?
-				JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT :
-				JSON_UNESCAPED_UNICODE
-		);
+	protected function validateAndSaveModel(Page|Template $pageOrTemplate, $cacheName = '') {
+
+		$newModel = $this->wire()->input->post->textarea('jsonld_model');
+		if($newModel === '') {
+			$data = [];
+		} else {
+			$data = json_decode($newModel, true);
+			if(json_last_error() !== JSON_ERROR_NONE) {
+				$this->error(sprintf($this->_('Invalid JSON in JSON-LD model: %s'), json_last_error_msg()));
+				$data = null; // signal "keep current"
+			}
+		}
+
+		// If the model has changed, clear the cache
+		$currentModel = $pageOrTemplate->get('jsonld_model');
+		if(!empty($cacheName) && $currentModel !== $newModel) {
+			$this->clearCache($cacheName);
+		}
+
+		$pageOrTemplate->set('jsonld_model', is_array($data) && count($data) ? $this->encodeValue($data) : (empty($newModel) ? '' : $currentModel));
 	}
 
 	/**

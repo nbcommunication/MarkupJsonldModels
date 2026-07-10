@@ -38,7 +38,7 @@ This module allows you to define JSON-LD models on a per-page and per-template b
 2. If you downloaded the zip file, extract it in your `sites/modules` directory.
 3. In your admin, go to Modules > Refresh, then Modules > New, then click on the Install button for this module.
 
-**ProcessWire >= 3.0.218 and PHP >= 7.1 are required to use this module.**
+**ProcessWire >= 3.0.218 and PHP >= 8.0 are required to use this module.**
 
 ## Usage
 

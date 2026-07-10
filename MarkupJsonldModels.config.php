@@ -108,7 +108,7 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 
 		$modelPagesSelectors = ['include' => 'hidden'];
 		if($this->wire()->fields->get('jsonld_model')) {
-			$modelPagesSelectors['jsonld_model'] = '!=';
+			$modelPagesSelectors['jsonld_model!='] = '';
 		}
 		$allModelPages = $pages->find($modelPagesSelectors);
 		foreach($markupJsonldModels->getTemplates() as $template) {

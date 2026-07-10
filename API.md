@@ -353,6 +353,35 @@ $populatedJsonld = $markupJsonldModels->populatePlaceholders($jsonld, $page, [
 
 `populatePlaceholders()` forwards options to [[WireTextTools::populatePlaceholders()]].
 
+### Other public methods
+
+Two further public (but non-hookable) helper methods are available. These are used internally
+but may also be useful when writing your own hooks or placeholder-populating code:
+
+```php
+$markupJsonldModels = $modules->get('MarkupJsonldModels');
+
+// Prepare a value for safe inclusion in a JSON-LD string.
+// - Strings are trimmed, HTML-entity decoded, and JSON-escaped with the surrounding
+//   quotes stripped, so the result can be inserted directly inside an existing pair
+//   of quotes already present in the model string.
+// - Arrays are JSON-encoded as-is, including their own enclosing brackets/braces
+//   (so no surrounding quotes should be present in the model at the insertion point).
+$safeString = $markupJsonldModels->encodeValue('Some "value" with special chars & entities like &amp;');
+// => Some \"value\" with special chars & entities like &
+
+$safeArray = $markupJsonldModels->encodeValue(['@type' => 'Organization', 'name' => 'Acme']);
+// => {"@type":"Organization","name":"Acme"}
+
+// Decode HTML entities in a string (used internally on field/placeholder values before encoding)
+$decoded = $markupJsonldModels->unentities('Fish &amp; Chips');
+// => Fish & Chips
+```
+
+> ℹ️ `loadScripts(bool $overtype = false)` is also `public` but is an internal admin-UI helper —
+> it loads the CodeMirror/Overtype assets used by the page/template edit forms and the module
+> config screen. It is not intended for use outside the admin UI and is not documented further here.
+
 ## See also
 
 - [README.md](README.md) — placeholder syntax, hook examples, output behaviour, troubleshooting.
