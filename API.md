@@ -106,14 +106,15 @@ $defaultModel = $modules->getConfig('MarkupJsonldModels', 'jsonld_model');
 
 ## Writing models
 
-When writing models via the API you are typically assigning a JSON string to `jsonld_model` on a [[Page]], a [[Template]], or to the `jsonld_model` key of the module config. Use `json_encode()` to convert PHP arrays to JSON.
+When writing models via the API you are typically assigning a JSON string to `jsonld_model` on a [[Page]], a [[Template]], or to the `jsonld_model` key of the module config. Use `$markupJsonldModels->encodeValue()` to convert PHP arrays to JSON.
 
 ### Validate before saving
 
 Because the API does not validate JSON for you, a safe pattern is:
 
 ```php
-$json = json_encode($model);
+$markupJsonldModels = $modules->get('MarkupJsonldModels');
+$json = $markupJsonldModels->encodeValue($model);
 if($json === false || json_decode($json) === null) {
 	throw new WireException('Invalid JSON-LD model');
 }
@@ -122,6 +123,7 @@ if($json === false || json_decode($json) === null) {
 ### Updating a JSON-LD model for a page
 
 ```php
+$markupJsonldModels = $modules->get('MarkupJsonldModels');
 $pageToUpdate = $pages->get('/path/to/page/');
 if($pageToUpdate->id) {
 	if($pageToUpdate->hasField('jsonld_model')) {
@@ -132,7 +134,7 @@ if($pageToUpdate->id) {
 			'url' => '{page.httpUrl}',
 		];
 		$pageToUpdate->of(false); // output formatting must be off to set fields
-		$pageToUpdate->jsonld_model = json_encode($model);
+		$pageToUpdate->jsonld_model = $markupJsonldModels->encodeValue($model);
 		$pages->save($pageToUpdate);
 	} else {
 		// Page doesn't have the jsonld_model field
@@ -148,14 +150,15 @@ if($pageToUpdate->id) {
 ```php
 $templateToUpdate = $templates->get('template-name');
 if($templateToUpdate->id) {
-	if($modules->get('MarkupJsonldModels')->getTemplates()->has($templateToUpdate)) {
+	$markupJsonldModels = $modules->get('MarkupJsonldModels');
+	if($markupJsonldModels->getTemplates()->has($templateToUpdate)) {
 		$model = [
 			'@context' => 'https://schema.org',
 			'@type' => 'WebPage',
 			'name' => '{page.title}',
 			'url' => '{page.httpUrl}',
 		];
-		$templateToUpdate->jsonld_model = json_encode($model);
+		$templateToUpdate->jsonld_model = $markupJsonldModels->encodeValue($model);
 		$templates->save($templateToUpdate);
 	} else {
 		// Template not eligible for JSON-LD models
@@ -175,7 +178,8 @@ $defaultModel = [
 	'name' => '{page.title}',
 	'url' => '{page.httpUrl}',
 ];
-$modules->saveConfig('MarkupJsonldModels', 'jsonld_model', json_encode($defaultModel));
+$markupJsonldModels = $modules->get('MarkupJsonldModels');
+$markupJsonldModels->saveConfig($markupJsonldModels, 'jsonld_model', $markupJsonldModels->encodeValue($defaultModel));
 ```
 
 ## Clearing a model

@@ -262,6 +262,10 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			return $jsonld;
 		}
 
+		if(method_exists($page, 'modifyJsonldModel')) {
+			$jsonld = $page->modifyJsonldModel($jsonld, $this);
+		}
+
 		$ignorePlaceholders = array_filter(array_map('trim', explode("\n", $this->placeholders_ignore)));
 		if(count($ignorePlaceholders)) {
 			foreach($ignorePlaceholders as $placeholder) {
@@ -641,6 +645,11 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			return;
 		}
 		if(empty($data)) return; // empty but valid - silently skip
+
+		if(method_exists($page, 'modifyJsonldData')) {
+			$data = $page->modifyJsonldData($data, $this);
+			$jsonld = $this->encodeValue($data);
+		}
 
 		$event->return = str_replace(
 			'</head>',

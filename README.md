@@ -22,6 +22,9 @@ This module allows you to define JSON-LD models on a per-page and per-template b
 - [Hooks](#hooks)
   - [Changing module behaviour](#changing-module-behaviour)
   - [Modifying placeholder values and model output](#modifying-placeholder-values-and-model-output)
+- [Page Class Methods](#page-class-methods)
+  - [$page->modifyJsonldModel()](#page-modifyjsonldmodel)
+  - [$page->modifyJsonldData()](#page-modifyjsonlddata)
 - [Example Model and Output](#example-model-and-output)
 - [Working with Agent Tools](#working-with-agent-tools)
   - [Providing context for AI agents](#providing-context-for-ai-agents)
@@ -156,12 +159,10 @@ If the model is defined as an array of JSON-LD objects, the module will wrap thi
 ```json
 [
 	{
-		"@context": "https://schema.org",
 		"@type": "WebPage",
 		"name": "{page.title}"
 	},
 	{
-		"@context": "https://schema.org",
 		"@type": "Organization",
 		"name": "{setting.organisationName}"
 	}
@@ -383,6 +384,40 @@ $wire->addHookAfter('MarkupJsonldModels::getBreadcrumbPages', function(HookEvent
 	$event->return = $breadcrumbPages;
 });
 ```
+
+## Page Class Methods
+The module recognises two Page class methods that allow you to modify the JSON-LD model and the resolved data before it is output on the front end. These methods should be implemented on a Page class. Both pass the module's `MarkupJsonldModels` instance as the second argument, which can be used to access the module's methods and properties.
+
+### $page->modifyJsonldModel()
+This method allows you to modify the JSON-LD model for a page before it is resolved and output on the front end. It passes the model as a string, and should return the modified model as a string. For example:
+```php
+public function modifyJsonldModel(string $model, MarkupJsonldModels $markupJsonldModels) {
+	// Modify the model as needed
+	// For example
+	$model = str_replace(
+		'{page.title}',
+		"{$this->title} (#{$this->id})",
+		$model
+	);
+	return $model;
+}
+```
+
+### $page->modifyJsonldData()
+This method allows you to modify the resolved JSON-LD data for a page before it is output on the front end. It passes the data as an array, and should return the modified data as an array. For example:
+```php
+public function modifyJsonldData(array $data, MarkupJsonldModels $markupJsonldModels) {
+	// Modify the data as needed
+	// For example
+	$firstItem = $data['@graph'][0] ?? null;
+	if($firstItem) {
+		$firstItem['name'] = strtoupper($firstItem['name']);
+		$data['@graph'][0] = $firstItem;
+	}
+	return $data;
+}
+```
+This method is called after a cached model has been resolved, so it is useful for modifying the output of a model without needing to clear the cache.
 
 ## Example Model and Output
 Here is an example model with various placeholders:
