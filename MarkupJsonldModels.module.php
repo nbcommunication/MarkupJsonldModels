@@ -436,7 +436,11 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 							}
 						} else {
 
-							$value = $vars->get($field);
+							if(($f = $vars->getField($field)) && $f->type instanceof FieldtypeDatetime) {
+								$value = $vars->getUnformatted($field);
+							} else {
+								$value = $vars->get($field);
+							}
 						}
 
 					} else if($isInput) {
