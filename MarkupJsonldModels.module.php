@@ -568,6 +568,20 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			);
 		}
 
+		// Remove any full stops in var keys to avoid issues with WireTextTools::populatePlaceholders() not being able to resolve them
+		foreach($vars as $key => $value) {
+			if(strpos($key, '.') !== false) {
+				$newKey = str_replace('.', '_', $key);
+				$vars[$newKey] = $value;
+				unset($vars[$key]);
+				$jsonld = str_replace(
+					'{' . $key . '}',
+					'{' . $newKey . '}',
+					$jsonld
+				);
+			}
+		}
+
 		return $this->wire()->sanitizer->getTextTools()->populatePlaceholders($jsonld, $vars, array_merge([
 			'removeNullTags' => false,
 			'removeEmptyTags' => false,
