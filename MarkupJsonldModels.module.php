@@ -199,7 +199,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 * @return FieldsArray
 	 *
 	 */
-	public function ___getExampleFields(Fieldgroup $fieldgroup, Page $page = null) {
+	public function ___getExampleFields(Fieldgroup $fieldgroup, ?Page $page = null) {
 		$exampleFields = $this->wire(new FieldsArray());
 		if(!$fieldgroup->count()) {
 			return $exampleFields;
