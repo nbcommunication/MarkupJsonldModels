@@ -46,8 +46,9 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		$page = $this->wire()->page;
 
-		// The cache expiry selector is only checked on a full page save, so also clear the cache when a single field is saved
-		$this->addHookAfter('Pages::savedField', function(HookEvent $event) {
+		// Clear the cache when the page or a single field is saved
+		// The cache expiry selector only covers full page saves, and on older cores it misses caches created earlier in the same request
+		$this->addHookAfter('Pages::savedPageOrField', function(HookEvent $event) {
 			$page = $event->arguments(0);
 			if($this->isEligible($page)) {
 				$this->clearCache($this->getCacheName($page, true));
