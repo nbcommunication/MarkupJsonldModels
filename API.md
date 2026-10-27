@@ -61,7 +61,7 @@ The module adds **two** runtime properties to [[Page]] — `$page->jsonldModel` 
 | Property | Type | Description |
 |----------|------|-------------|
 | `$page->jsonldModel` | `string` \| `null` | The resolved JSON-LD string (page > template > default), **before** placeholders are replaced by their dynamic values. |
-| `$page->jsonldOutput` | `string` \| `null` | The **final, placeholder-populated** JSON-LD string. Note: for superusers the module pretty-prints (`JSON_PRETTY_PRINT`) the JSON it actually injects into the head, so the injected markup can differ in whitespace from this (compact) value. |
+| `$page->jsonldOutput` | `string` \| `null` | The **final, placeholder-populated** JSON-LD string. Note: for superusers the module pretty-prints (`JSON_PRETTY_PRINT`) the JSON it actually injects into the head, so the injected markup can differ in whitespace from this (compact) value. The injected JSON is always re-encoded from the decoded data, with `<` and `>` escaped as `\u003C`/`\u003E`. |
 | `$page->jsonld_model` | `string` | The raw stored JSON on the page (the underlying field value), with placeholders still in place. Empty if not set. |
 
 ## Reading models
@@ -211,6 +211,8 @@ $markupJsonldModels->clearCache();
 
 Saving a page via the API will automatically clear the cache for that page, so you don't need to do anything extra after updating page-level models.
 
+`{setting.*}` and `{input.*}` placeholders can vary per request, so they are left in place in the cached model and populated each time it is retrieved, via `populateRequestPlaceholders()`.
+
 Note: when `$config->debug` is true the module bypasses the cache entirely and resolves `$page->jsonldOutput` on every request. If output looks correct with debug on but stale with debug off, clear the cache.
 
 ## Adding the `jsonld_model` field to a template
@@ -325,7 +327,7 @@ All of the following are hookable. Add hooks in `/site/ready.php`. See the [READ
 |--------|---------|---------|
 | `MarkupJsonldModels::getTemplates()` | [[TemplatesArray]] | Templates eligible for JSON-LD models. Default: all non-system templates with `html` (or unset) content type. |
 | `MarkupJsonldModels::getExampleFields(Fieldgroup $fieldgroup, Page $page = null)` | [[FieldsArray]] | Fields shown as placeholder hints in the admin field notes. |
-| `MarkupJsonldModels::populateModel(string $jsonld, Page $page)` | `string` | The placeholder-population step. Hook to modify the resolved model before it is rendered. |
+| `MarkupJsonldModels::populateModel(string $jsonld, Page $page, bool $deferRequest = false)` | `string` | The placeholder-population step. Hook to modify the resolved model before it is rendered. When caching is active its output is cached and `$deferRequest` is `true`, leaving `{setting.*}` and `{input.*}` placeholders to be populated per request. |
 | `MarkupJsonldModels::populatePagefile(Pagefile $pagefile)` | `array` | Conversion of any [[Pagefile]] placeholder to a `DigitalDocument` array. |
 | `MarkupJsonldModels::populatePageimage(Pageimage $pageimage)` | `array` | Conversion of any [[Pageimage]] placeholder to an `ImageObject` array. |
 | `MarkupJsonldModels::getBreadcrumbList(Page $page)` | `array` | Items rendered for the `{breadcrumbList}` placeholder. |
@@ -345,6 +347,9 @@ $markupJsonldModels->clearCache('templateName.*'); // clear all pages for a temp
 $markupJsonldModels->clearCache('templateName.pageId'); // clear a specific page
 $markupJsonldModels->clearCache('templateName.pageId.*'); // clear a specific page on a multi-language install (all languages)
 $markupJsonldModels->clearCache($markupJsonldModels->getCacheName($page, true)); // clear a specific page (works with or without multi-language)
+
+// Populate {setting.*} and {input.*} placeholders (used internally after a cached model is retrieved)
+$populatedJsonld = $markupJsonldModels->populateRequestPlaceholders($cachedJsonld);
 
 // Populate placeholders in a JSON-LD string (used internally before rendering)
 $jsonld = '{"@context": "https://schema.org", "@type": "WebPage", "name": "{page.title}"}';

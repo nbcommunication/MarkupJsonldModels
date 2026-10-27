@@ -251,6 +251,8 @@ $wire->addHookAfter('MarkupJsonldModels::getExampleFields', function(HookEvent $
 ### Modifying placeholder values and model output
 
 #### MarkupJsonldModels::populateModel()
+When caching is active (`$config->debug` is not enabled), `populateModel()` runs once per page and its output is cached, with `{setting.*}` and `{input.*}` placeholders left unpopulated (the third argument, `$deferRequest`, is `true`). Keep this in mind when hooking it: anything that varies per request should not be added here.
+
 Populate a custom placeholder:
 ```php
 $wire->addHookBefore('MarkupJsonldModels::populateModel', function(HookEvent $event) {
@@ -419,6 +421,8 @@ public function modifyJsonldData(array $data, MarkupJsonldModels $markupJsonldMo
 ```
 This method is called after a cached model has been resolved, so it is useful for modifying the output of a model without needing to clear the cache.
 
+As the data is passed as an array, any empty objects (`{}`) in the model will be output as empty arrays (`[]`) when this method is defined. If you need an empty object, set the value to `new \stdClass()`.
+
 ## Example Model and Output
 Here is an example model with various placeholders:
 ```json
@@ -480,9 +484,11 @@ Here are some example prompts you could use with an AI agent to generate JSON-LD
 When `$config->debug` is not enabled, this module implements a simple caching layer to store the resolved JSON-LD models for each page, to improve performance and reduce the processing needed on each page load.
 
 - On multi-language installs, a separate cache is stored for each language.
+- `{setting.*}` and `{input.*}` placeholders can vary per request, so they are left in place in the cached model and populated each time it is retrieved. Changes to `setting()` values do not require the cache to be cleared.
 - The cache for a page is automatically cleared when a page is saved.
 - When a template is saved, the cache for all pages using that template is cleared.
 - When the default model in the module config is updated, the cache for all pages is cleared.
+- The cache for a page is not cleared when other pages it draws values from are saved, e.g. the homepage for `{home.*}` placeholders or parent pages in `{breadcrumbList}`. Clear the cache if these change.
 
 You can also trigger the cache to be cleared by clicking the **Clear cache** button on the module config screen.
 

@@ -36,11 +36,25 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 
 		$markupJsonldModels = $modules->get(str_replace('Config', '', $this->className));
 
-		// If the cache clear button was pressed or the default model was changed, clear the cache and reload the page
-		if($input->post->bool('clearCache') || ($input->post('submit_save_module') && $input->post('_jsonld_model_previous') !== $markupJsonldModels->jsonld_model)) {
+		// If the cache clear button was pressed, clear the cache and reload the page
+		if($input->post->bool('clearCache')) {
 			$markupJsonldModels->clearCache();
 			$markupJsonldModels->message($this->_('Cache cleared'));
 			$this->wire()->session->redirect($input->url(true));
+		}
+
+		// If the default model is being changed, clear the cache
+		// This runs before ProcessModule saves the config, so the module still holds the previous model
+		$_normalise = function($value) {
+			return trim(str_replace("\r\n", "\n", (string) $value));
+		};
+		if(
+			$input->post('submit_save_module') &&
+			$input->post('jsonld_model') !== null &&
+			$_normalise($input->post('jsonld_model')) !== $_normalise($markupJsonldModels->jsonld_model)
+		) {
+			$markupJsonldModels->clearCache();
+			$markupJsonldModels->message($this->_('Cache cleared'));
 		}
 
 		$inputfields = parent::getInputfields();
@@ -64,12 +78,6 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 			'description' => $this->_('Enter a list of placeholder names that should be ignored (left as they are in your model) when generating JSON-LD models.'),
 			'notes' => $this->_('Please enter one placeholder name per line.'),
 			'icon' => 'leaf',
-		]);
-
-		$inputfields->add([
-			'type' => 'hidden',
-			'name' => '_jsonld_model_previous',
-			'value' => $markupJsonldModels->jsonld_model,
 		]);
 
 		if($modules->isInstalled('AgentTools')) {

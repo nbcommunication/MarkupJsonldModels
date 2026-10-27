@@ -35,6 +35,9 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	/** @var TemplatesArray */
 	protected $eligibleTemplates;
 
+	/** @var string Regex matching placeholders that vary per request, populated after a cached model is retrieved */
+	const requestPlaceholders = '(?:setting|input)\.[a-zA-Z0-9_.|]+';
+
 	/**
 	 * When ProcessWire is ready
 	 *
@@ -42,6 +45,14 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	public function ready() {
 
 		$page = $this->wire()->page;
+
+		// The cache expiry selector is only checked on a full page save, so also clear the cache when a single field is saved
+		$this->addHookAfter('Pages::savedField', function(HookEvent $event) {
+			$page = $event->arguments(0);
+			if($this->isEligible($page)) {
+				$this->clearCache($this->getCacheName($page, true));
+			}
+		});
 
 		if($page->template->name === 'admin') {
 
@@ -79,18 +90,22 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 					return;
 				}
 
-				$_populate = function() use ($page) {
-					return $this->populateModel($page->jsonldModel, $page);
-				};
+				if($this->wire()->config->debug) {
+					$event->return = $this->populateModel($page->jsonldModel, $page);
+					return;
+				}
 
-				$event->return = $this->wire()->config->debug ?
-					$_populate() :
+				// {setting.*} and {input.*} placeholders vary per request, so they are left in the cached model and populated afterwards
+				$event->return = $this->populateRequestPlaceholders(
 					$this->wire()->cache->getFor(
 						$this,
 						$this->getCacheName($page),
 						"id={$page->id}", // expiry by selector so it is automatically cleared when the page is saved
-						$_populate
-					);
+						function() use ($page) {
+							return $this->populateModel($page->jsonldModel, $page, true);
+						}
+					)
+				);
 			});
 
 			// If not the admin, add hook to page render to add JSON-LD to the head
@@ -270,10 +285,11 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 *
 	 * @param string $jsonld
 	 * @param Page $page
+	 * @param bool $deferRequest If true, {setting.*} and {input.*} placeholders are left in place to be populated later with populateRequestPlaceholders()
 	 * @return string
 	 *
 	 */
-	public function ___populateModel($jsonld, Page $page) {
+	public function ___populateModel($jsonld, Page $page, $deferRequest = false) {
 
 		if(empty($jsonld) || strpos($jsonld, '{') === false) {
 			return $jsonld;
@@ -283,16 +299,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			$jsonld = $page->modifyJsonldModel($jsonld, $this);
 		}
 
-		$ignorePlaceholders = array_filter(array_map('trim', explode("\n", $this->placeholders_ignore)));
-		if(count($ignorePlaceholders)) {
-			foreach($ignorePlaceholders as $placeholder) {
-				$jsonld = str_replace(
-					'{' . $placeholder . '}',
-					'[[' . $placeholder . ']]', // temporarily replace with square braces to avoid being populated
-					$jsonld
-				);
-			}
-		}
+		$jsonld = $this->ignorePlaceholders($jsonld);
 
 		// Populate Page breadcrumb items
 		if(strpos($jsonld, '{breadcrumbList}') !== false) {
@@ -301,13 +308,6 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 				$this->encodeValue($this->getBreadcrumbList($page)),
 				$jsonld
 			);
-		}
-
-		// Populate setting() vars
-		if(strpos($jsonld, '{setting.') !== false) {
-			$jsonld = $this->populatePlaceholders($jsonld, setting() ?: [], [
-				'prefix' => 'setting',
-			]);
 		}
 
 		// Populate the homepage fields with {home.fieldname} placeholders
@@ -324,11 +324,11 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			]);
 		}
 
-		// Populate $input vars
-		if(strpos($jsonld, '{input.') !== false) {
-			$jsonld = $this->populatePlaceholders($jsonld, $this->wire()->input, [
-				'prefix' => 'input',
-			]);
+		// Populate setting() and $input vars, or protect them from removal below if deferred
+		if($deferRequest) {
+			$jsonld = preg_replace('/\{(' . self::requestPlaceholders . ')\}/', '[[$1]]', $jsonld);
+		} else {
+			$jsonld = $this->populateRequestPlaceholders($jsonld);
 		}
 
 		// Remove any placeholder tags that do not resolve
@@ -339,18 +339,53 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			// For example {"field": "{page.empty_field}"} would resolve to {"field": ""} rather than being removed entirely
 		]);
 
-		// Restore any ignored placeholders back to their original form
-		if(count($ignorePlaceholders)) {
-			foreach($ignorePlaceholders as $placeholder) {
-				$jsonldModel = str_replace(
-					'[[' . $placeholder . ']]',
-					'{' . $placeholder . '}',
-					$jsonldModel
-				);
-			}
+		// Restore any deferred and ignored placeholders back to their original form
+		if($deferRequest) {
+			$jsonldModel = preg_replace('/\[\[(' . self::requestPlaceholders . ')\]\]/', '{$1}', $jsonldModel);
 		}
+		$jsonldModel = $this->ignorePlaceholders($jsonldModel, true);
 
 		return $this->unentities($jsonldModel);
+	}
+
+	/**
+	 * Populate {setting.*} and {input.*} placeholders
+	 *
+	 * Called after a cached model has been retrieved, as these values vary per request.
+	 *
+	 * @param string $jsonld
+	 * @return string
+	 *
+	 */
+	public function populateRequestPlaceholders($jsonld) {
+
+		$hasSetting = strpos((string) $jsonld, '{setting.') !== false;
+		$hasInput = strpos((string) $jsonld, '{input.') !== false;
+		if(!$hasSetting && !$hasInput) {
+			return $jsonld;
+		}
+
+		$jsonld = $this->ignorePlaceholders($jsonld);
+
+		if($hasSetting) {
+			$jsonld = $this->populatePlaceholders($jsonld, setting() ?: [], [
+				'prefix' => 'setting',
+			]);
+		}
+
+		if($hasInput) {
+			$jsonld = $this->populatePlaceholders($jsonld, $this->wire()->input, [
+				'prefix' => 'input',
+			]);
+		}
+
+		// Remove tags that resolve to empty, as this may run after the cleanup in populateModel()
+		$jsonld = $this->populatePlaceholders($jsonld, [], [
+			'removeNullTags' => true,
+			'removeEmptyTags' => true,
+		]);
+
+		return $this->ignorePlaceholders($jsonld, true);
 	}
 
 	/**
@@ -607,6 +642,28 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	}
 
 	/**
+	 * Protect (or restore) placeholders listed in the placeholders_ignore setting so they are not populated
+	 *
+	 * @param string $jsonld
+	 * @param bool $restore If true, restore protected placeholders back to their original form
+	 * @return string
+	 *
+	 */
+	protected function ignorePlaceholders($jsonld, $restore = false) {
+		foreach(array_filter(array_map('trim', explode("\n", (string) $this->placeholders_ignore))) as $placeholder) {
+			$placeholder = [
+				'{' . $placeholder . '}',
+				'[[' . $placeholder . ']]', // temporarily replace with square braces to avoid being populated
+			];
+			if($restore) {
+				$placeholder = array_reverse($placeholder);
+			}
+			$jsonld = str_replace($placeholder[0], $placeholder[1], $jsonld);
+		}
+		return $jsonld;
+	}
+
+	/**
 	 * Decode HTML entities in a string
 	 *
 	 * @param string $str
@@ -648,25 +705,31 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			return;
 		}
 
-		// // Escape any control characters in the JSON-LD model to avoid breaking the JSON output
-		$jsonld = preg_replace_callback('/[\x00-\x1F\x7F]/', function($matches) {
-			$char = $matches[0];
-			switch($char) {
-				case "\b": return '\\b';
-				case "\f": return '\\f';
-				case "\n": return '\\n';
-				case "\r": return '\\r';
-				case "\t": return '\\t';
-				default: return sprintf('\\u%04x', ord($char));
-			}
-		}, $jsonld);
-
 		// An array of JSON-LD objects should be wrapped in a @graph
 		if(isset($jsonld[0]) && $jsonld[0] === '[' && substr($jsonld, -1) === ']' && trim($jsonld) !== '[]') {
 			$jsonld = "{\"@context\":\"https://schema.org\",\"@graph\":$jsonld}";
 		}
 
-		$data = json_decode($jsonld, true);
+		// Decode to objects to preserve empty {} on re-encoding, unless modifyJsonldData() expects an array
+		$modifyData = method_exists($page, 'modifyJsonldData');
+
+		$data = json_decode($jsonld, $modifyData);
+		if($data === null && json_last_error() !== JSON_ERROR_NONE) {
+			// Retry with control characters escaped, in case any are present within string values
+			// (not done first as this would break whitespace between tokens in a pretty-printed model)
+			$jsonld = preg_replace_callback('/[\x00-\x1F\x7F]/', function($matches) {
+				$char = $matches[0];
+				switch($char) {
+					case "\x08": return '\\b';
+					case "\f": return '\\f';
+					case "\n": return '\\n';
+					case "\r": return '\\r';
+					case "\t": return '\\t';
+					default: return sprintf('\\u%04x', ord($char));
+				}
+			}, $jsonld);
+			$data = json_decode($jsonld, $modifyData);
+		}
 		if($data === null && json_last_error() !== JSON_ERROR_NONE) {
 			$files = $this->wire()->files;
 			$logDir = $this->wire()->config->paths->assets . ".{$this->className}";
@@ -679,22 +742,21 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 			$this->log(sprintf($this->_('Invalid JSON-LD model for page %1$d: %2$s. Result logged to %3$s'), $page->id, json_last_error_msg(), $logFile));
 			return;
 		}
-		if(empty($data)) return; // empty but valid - silently skip
+		if(empty((array) $data)) return; // empty but valid - silently skip
 
-		if(method_exists($page, 'modifyJsonldData')) {
+		if($modifyData) {
 			$data = $page->modifyJsonldData($data, $this);
-			$jsonld = $this->encodeValue($data);
+		}
+
+		// Always re-encode the decoded data, with < and > escaped, so values can't break out of the script tag
+		$flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG;
+		if($this->wire()->user->isSuperUser()) {
+			$flags |= JSON_PRETTY_PRINT;
 		}
 
 		$event->return = str_replace(
 			'</head>',
-			'<script type="application/ld+json">' .
-				($this->wire()->user->isSuperUser() ?
-					json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) :
-					$jsonld
-				) .
-			'</script>' .
-			'</head>',
+			'<script type="application/ld+json">' . json_encode($data, $flags) . '</script></head>',
 			$html
 		);
 	}
@@ -712,6 +774,9 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		// Only act when the form actually submitted this field
 		if($input->post('jsonld_model') === null) return;
+
+		// Only act on the page that ProcessPageEdit is editing
+		if((int) $input->post('id') !== $page->id) return;
 
 		if(!$this->isEligible($page)) return;
 
