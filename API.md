@@ -343,6 +343,8 @@ $markupJsonldModels->clearCache();
 // Clear specific cache entries, e.g. for a specific template or page
 $markupJsonldModels->clearCache('templateName.*'); // clear all pages for a template
 $markupJsonldModels->clearCache('templateName.pageId'); // clear a specific page
+$markupJsonldModels->clearCache('templateName.pageId.*'); // clear a specific page on a multi-language install (all languages)
+$markupJsonldModels->clearCache($markupJsonldModels->getCacheName($page, true)); // clear a specific page (works with or without multi-language)
 
 // Populate placeholders in a JSON-LD string (used internally before rendering)
 $jsonld = '{"@context": "https://schema.org", "@type": "WebPage", "name": "{page.title}"}';

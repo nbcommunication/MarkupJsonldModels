@@ -134,7 +134,7 @@ class MarkupJsonldModelsConfig extends ModuleConfig {
 					$rows['page'][] = [
 						$page->title,
 						"<a href=\"$page->url\" target=\"_blank\">$page->url</a>",
-						$cache->getFor($markupJsonldModels, "{$page->template->name}.{$page->id}") ?
+						$cache->getFor($markupJsonldModels, $markupJsonldModels->getCacheName($page, true)) ?
 							$this->_('Yes') :
 							$this->_('No'),
 						$_editButton($page->editUrl)

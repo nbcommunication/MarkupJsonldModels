@@ -87,7 +87,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 					$_populate() :
 					$this->wire()->cache->getFor(
 						$this,
-						"{$page->template->name}.{$page->id}",
+						$this->getCacheName($page),
 						"id={$page->id}", // expiry by selector so it is automatically cleared when the page is saved
 						$_populate
 					);
@@ -105,6 +105,23 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 	 */
 	public function clearCache($name = '*') {
 		$this->wire()->cache->deleteFor($this, $name);
+	}
+
+	/**
+	 * Get the cache name for a page's JSON-LD model output
+	 *
+	 * On multi-language installs the name is suffixed with the current user's language name.
+	 *
+	 * @param Page $page
+	 * @param bool $allLanguages Use a wildcard in place of the language (multi-language only), e.g. for clearing/checking all languages
+	 * @return string
+	 */
+	public function getCacheName(Page $page, $allLanguages = false) {
+		$name = "{$page->template->name}.{$page->id}";
+		if($this->wire()->languages) {
+			$name .= '.' . ($allLanguages ? '*' : $this->wire()->user->language->name);
+		}
+		return $name;
 	}
 
 	/**
@@ -698,7 +715,7 @@ class MarkupJsonldModels extends WireData implements Module, ConfigurableModule 
 
 		if(!$this->isEligible($page)) return;
 
-		$this->validateAndSaveModel($page, "{$page->template->name}.{$page->id}");
+		$this->validateAndSaveModel($page, $this->getCacheName($page, true));
 	}
 
 	/**

@@ -479,6 +479,7 @@ Here are some example prompts you could use with an AI agent to generate JSON-LD
 ## Caching
 When `$config->debug` is not enabled, this module implements a simple caching layer to store the resolved JSON-LD models for each page, to improve performance and reduce the processing needed on each page load.
 
+- On multi-language installs, a separate cache is stored for each language.
 - The cache for a page is automatically cleared when a page is saved.
 - When a template is saved, the cache for all pages using that template is cleared.
 - When the default model in the module config is updated, the cache for all pages is cleared.
